@@ -1,0 +1,120 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 40 33% 96%;
+    --foreground: 240 10% 12%;
+    --card: 0 0% 100%;
+    --card-foreground: 240 10% 12%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 10% 12%;
+    --primary: 243 56% 31%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 260 50% 45%;
+    --secondary-foreground: 0 0% 100%;
+    --muted: 40 20% 92%;
+    --muted-foreground: 240 6% 45%;
+    --accent: 165 60% 38%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 142 60% 40%;
+    --success-foreground: 0 0% 100%;
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 100%;
+    --border: 240 8% 86%;
+    --input: 240 8% 86%;
+    --ring: 243 56% 31%;
+    --chart-1: 243 56% 45%;
+    --chart-2: 260 50% 55%;
+    --chart-3: 165 60% 42%;
+    --chart-4: 38 92% 50%;
+    --chart-5: 0 72% 51%;
+    --radius: 0.625rem;
+  }
+
+  .dark {
+    --background: 240 10% 7%;
+    --foreground: 40 20% 92%;
+    --card: 240 10% 10%;
+    --card-foreground: 40 20% 92%;
+    --popover: 240 10% 10%;
+    --popover-foreground: 40 20% 92%;
+    --primary: 239 68% 64%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 260 50% 60%;
+    --secondary-foreground: 0 0% 100%;
+    --muted: 240 8% 16%;
+    --muted-foreground: 240 6% 60%;
+    --accent: 165 55% 48%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 62% 45%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 142 55% 45%;
+    --success-foreground: 0 0% 100%;
+    --warning: 38 80% 55%;
+    --warning-foreground: 240 10% 10%;
+    --border: 240 8% 20%;
+    --input: 240 8% 20%;
+    --ring: 239 68% 64%;
+    --chart-1: 239 68% 64%;
+    --chart-2: 260 50% 65%;
+    --chart-3: 165 55% 50%;
+    --chart-4: 38 80% 55%;
+    --chart-5: 0 62% 55%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: 'cv11', 'ss01';
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
+@layer utilities {
+  .safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 0.5rem);
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-left: env(safe-area-inset-left, 0px);
+    padding-right: env(safe-area-inset-right, 0px);
+  }
+  .safe-top {
+    padding-top: env(safe-area-inset-top, 0px);
+  }
+  .pb-nav {
+    padding-bottom: calc(4.5rem + env(safe-area-inset-bottom, 0px));
+  }
+  .text-balance {
+    text-wrap: balance;
+  }
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

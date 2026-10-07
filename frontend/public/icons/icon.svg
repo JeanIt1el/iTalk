@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" fill="none">
+  <rect width="512" height="512" rx="112" fill="#3730A3"/>
+  <path d="M256 120C190 120 136 174 136 240C136 306 190 360 256 360C322 360 376 306 376 240C376 174 322 120 256 120ZM256 320C212 320 176 284 176 240C176 196 212 160 256 160C300 160 336 196 336 240C336 284 300 320 256 320Z" fill="white"/>
+  <path d="M256 180C223 180 196 207 196 240C196 273 223 300 256 300C289 300 316 273 316 240C316 207 289 180 256 180Z" fill="#6D28D9"/>
+  <circle cx="256" cy="240" r="20" fill="white"/>
+  <text x="256" y="420" text-anchor="middle" fill="white" font-family="Arial, sans-serif" font-size="48" font-weight="bold" opacity="0.9">iTalk</text>
+</svg>
