@@ -12,6 +12,10 @@ def test_health_endpoint():
     assert response.json()["status"] == "ok"
 
 
+def test_conversation_session_route_is_registered_at_api_prefix():
+    assert "/api/v1/conversation/sessions" in app.openapi()["paths"]
+
+
 def test_authentication_requires_supabase_configuration():
     response = client.post(
         "/api/v1/auth/login",

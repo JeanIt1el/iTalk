@@ -30,6 +30,7 @@ export function ConversationPage() {
   const { toast } = useToast();
   const [scenarios, setScenarios] = useState<ConversationScenarioInfo[]>([]);
   const [selectedScenario, setSelectedScenario] = useState<ConversationScenarioInfo | null>(null);
+  const [sessionId, setSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
@@ -50,18 +51,23 @@ export function ConversationPage() {
   }, [messages, isTyping]);
 
   const startSession = useCallback(async (scenario: ConversationScenarioInfo) => {
-    setSelectedScenario(scenario);
     setSummary(null);
     setShowSummary(false);
     setCorrections([]);
     setSuggestions([]);
-    const session = await conversationService.startSession(scenario.id);
-    setMessages(session.messages);
-  }, [selectedScenario, messages, isTyping, corrections, suggestions, summary, showSummary]);
+    try {
+      const session = await conversationService.startSession(scenario.id);
+      setSelectedScenario(scenario);
+      setSessionId(session.id);
+      setMessages(session.messages);
+    } catch {
+      toast('Impossible de démarrer la conversation. Vérifiez votre connexion puis réessayez.', { variant: 'error' });
+    }
+  }, [toast]);
 
   const handleSend = useCallback(async (text?: string) => {
     const content = text ?? input.trim();
-    if (!content || isTyping) return;
+    if (!content || isTyping || !sessionId) return;
 
     const userMsg: ConversationMessage = {
       id: `msg-${Date.now()}`,
@@ -80,7 +86,7 @@ export function ConversationPage() {
 
     try {
       const reply = await conversationService.sendMessage(
-        'session-001',
+        sessionId,
         content,
         showTranslations,
         enableCorrections,
@@ -108,17 +114,19 @@ export function ConversationPage() {
         setIsTyping(false);
       }
     }
-  }, [input, isTyping, showTranslations, enableCorrections, toast, selectedScenario, messages, corrections, suggestions, summary, showSummary]);
+  }, [input, isTyping, showTranslations, enableCorrections, toast, sessionId]);
 
   const handleEndSession = useCallback(async () => {
-    const sum = await conversationService.endSession('session-001');
+    if (!sessionId) return;
+    const sum = await conversationService.endSession(sessionId);
     setSummary(sum);
     setShowSummary(true);
     toast('Session terminée !', { variant: 'success' });
-  }, [toast, selectedScenario, messages, corrections, suggestions, summary, showSummary]);
+  }, [toast, sessionId]);
 
   const handleRestart = useCallback(() => {
     setSelectedScenario(null);
+    setSessionId(null);
     setMessages([]);
     setSummary(null);
     setShowSummary(false);

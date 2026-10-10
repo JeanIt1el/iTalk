@@ -177,6 +177,25 @@ class ReadingProgressRequest(BaseModel):
     is_completed: bool = False
 
 
+class VocabularyItemCreate(BaseModel):
+    word: str = Field(min_length=1, max_length=200)
+    translation: str = Field(min_length=1, max_length=500)
+    context_sentence: str | None = Field(default=None, max_length=2000)
+
+
+class LearningSessionCreate(BaseModel):
+    module_type: SKILL_TYPE
+    scenario: str | None = None
+    title: str | None = None
+    description: str | None = None
+    level: CEFR_LEVEL = "B1"
+
+
+class LearningSessionComplete(BaseModel):
+    duration_seconds: int = Field(ge=0)
+    score: int | None = Field(default=None, ge=0, le=100)
+
+
 class SpeechRecordingRequest(BaseModel):
     transcript: str
     duration: int = Field(ge=0)

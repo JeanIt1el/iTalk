@@ -1,5 +1,6 @@
 import type { ApiRequestConfig, ApiResponse, PaginatedResponse } from '@/types/api';
 import { useAuthStore } from '@/stores/useAuthStore';
+import { supabase } from '@/lib/supabase';
 
 /**
  * API client for the FastAPI backend.
@@ -8,6 +9,45 @@ import { useAuthStore } from '@/stores/useAuthStore';
 
 const MOCK_LATENCY_MS = 400;
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '/api/v1';
+
+export class ApiError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+    this.name = 'ApiError';
+  }
+}
+
+function isJwt(token: string): boolean {
+  return token.split('.').length === 3;
+}
+
+async function getAccessToken(): Promise<string | null> {
+  if (supabase) {
+    try {
+      const { data, error } = await supabase.auth.getSession();
+      if (error) throw error;
+      const token = data.session?.access_token ?? null;
+      useAuthStore.getState().setToken(token);
+      return token;
+    } catch {
+      useAuthStore.getState().setToken(null);
+      return null;
+    }
+  }
+
+  const token = useAuthStore.getState().token;
+  if (!token || !isJwt(token)) {
+    useAuthStore.getState().setToken(null);
+    return null;
+  }
+  return token;
+}
+
+function createHeaders(token: string | null): Headers {
+  const headers = new Headers({ 'Content-Type': 'application/json' });
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+  return headers;
+}
 
 function delay(ms: number = MOCK_LATENCY_MS, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -34,7 +74,7 @@ export async function apiRequest<T>(
 ): Promise<ApiResponse<T>> {
   await delay();
 
-  const token = useAuthStore.getState().token;
+  let token = await getAccessToken();
   const url = new URL(`${API_BASE_URL}${endpoint}`, window.location.origin);
   if (options.params) {
     Object.entries(options.params).forEach(([key, value]) => {
@@ -42,21 +82,30 @@ export async function apiRequest<T>(
     });
   }
 
-  const headers = new Headers({ 'Content-Type': 'application/json' });
-  if (token) {
-    headers.set('Authorization', `Bearer ${token}`);
-  }
-
-  const response = await fetch(url.toString(), {
+  const request = (accessToken: string | null) => fetch(url.toString(), {
     method: options.method ?? 'GET',
-    headers,
+    headers: createHeaders(accessToken),
     body: options.body ? JSON.stringify(options.body) : undefined,
     signal: options.signal,
   });
+  let response = await request(token);
+
+  if (response.status === 401 && supabase) {
+    try {
+      const { data, error } = await supabase.auth.refreshSession();
+      token = error ? null : data.session?.access_token ?? null;
+      useAuthStore.getState().setToken(token);
+      if (token) response = await request(token);
+    } catch {
+      token = null;
+      useAuthStore.getState().setToken(null);
+    }
+  }
 
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(payload.detail ?? payload.error ?? `API error: ${response.status}`);
+    if (response.status === 401) useAuthStore.getState().setToken(null);
+    throw new ApiError(payload.detail ?? payload.error ?? `API error: ${response.status}`, response.status);
   }
 
   return {

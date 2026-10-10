@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { BookOpen, Clock, ChevronLeft, ChevronRight, CheckCircle2 } from 'lucide-react';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { LoadingState } from '@/components/shared/LoadingState';
@@ -25,6 +25,7 @@ export function ReadingPage() {
   const [selectedText, setSelectedText] = useState<ReadingText | null>(null);
   const [textSize, setTextSize] = useState<'small' | 'medium' | 'large'>('medium');
   const [readingProgress, setReadingProgress] = useState(0);
+  const readingStartedAt = useRef<number>(0);
 
   useEffect(() => {
     learningService.getReadingTexts().then((result) => {
@@ -38,6 +39,31 @@ export function ReadingPage() {
       setReadingProgress(0);
     }
   }, [selectedText]);
+
+  useEffect(() => {
+    if (!selectedText || !readingStartedAt.current) return;
+    const timer = window.setTimeout(() => {
+      void learningService.updateReadingProgress({
+        textId: selectedText.id,
+        progress: Math.round(readingProgress),
+        timeSpent: Math.floor((Date.now() - readingStartedAt.current) / 1000),
+        wordsRead: Math.floor(selectedText.wordCount * readingProgress / 100),
+        isCompleted: readingProgress >= 100,
+      });
+    }, 750);
+    return () => window.clearTimeout(timer);
+  }, [selectedText, readingProgress]);
+
+  const saveCurrentProgress = () => {
+    if (!selectedText) return;
+    void learningService.updateReadingProgress({
+      textId: selectedText.id,
+      progress: Math.round(readingProgress),
+      timeSpent: Math.floor((Date.now() - readingStartedAt.current) / 1000),
+      wordsRead: Math.floor(selectedText.wordCount * readingProgress / 100),
+      isCompleted: readingProgress >= 100,
+    });
+  };
 
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const el = e.currentTarget;
@@ -53,7 +79,7 @@ export function ReadingPage() {
     return (
       <div className="mx-auto max-w-2xl space-y-4">
         <div className="flex items-center justify-between">
-          <Button variant="ghost" size="sm" onClick={() => setSelectedText(null)}>
+          <Button variant="ghost" size="sm" onClick={() => { saveCurrentProgress(); setSelectedText(null); }}>
             <ChevronLeft className="mr-1 h-4 w-4" />
             Retour
           </Button>
@@ -123,7 +149,7 @@ export function ReadingPage() {
           {texts.map((text) => (
             <button
               key={text.id}
-              onClick={() => setSelectedText(text)}
+              onClick={() => { readingStartedAt.current = Date.now(); setSelectedText(text); }}
               className="group flex w-full items-start gap-3 rounded-xl border border-border bg-card p-4 text-left transition-all hover:border-primary/30 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-secondary/10 text-secondary">

@@ -33,8 +33,8 @@ def get_reading_contents(user: UserContext = Depends(get_current_user)) -> list[
         .order("created_at", desc=False)
         .execute()
     )
-    if response.error:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=response.error)
+    if getattr(response, "error", None):
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unable to load reading content")
     return [_map_reading_content(item) for item in response.data]
 
 
@@ -46,12 +46,14 @@ def update_reading_progress(
     client = _create_supabase_client(user.access_token)
     progress = {
         "user_id": str(user.user_id),
-        "skill_name": "reading",
-        "level_estimate": "A1",
+        "text_id": payload.text_id,
+        **payload.model_dump(exclude={"text_id"}),
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
-    client.postgrest.from_("skill_progress").upsert(
+    response = client.postgrest.from_("reading_progress").upsert(
         progress,
-        on_conflict="user_id,skill_name",
+        on_conflict="user_id,text_id",
     ).execute()
-    return payload.model_dump()
+    if getattr(response, "error", None):
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unable to save reading progress")
+    return response.data[0] if response.data else progress

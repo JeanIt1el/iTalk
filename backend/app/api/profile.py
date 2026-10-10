@@ -14,7 +14,7 @@ def _load_profile(user: UserContext) -> dict:
     profile_response = client.postgrest.from_("profiles").select(
         "id, full_name, native_language, target_language, level, avatar_url, created_at"
     ).eq("id", str(user.user_id)).execute()
-    if profile_response.error or not profile_response.data:
+    if getattr(profile_response, "error", None) or not profile_response.data:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Profile not found",
