@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     )
 
     groq_api_key: str = Field(default="", validation_alias="GROQ_API_KEY")
-    groq_model: str = Field(default="llama-3.3-70b-versatile", validation_alias="GROQ_MODEL")
+    groq_model: str = Field(default="openai/gpt-oss-20b", validation_alias="GROQ_MODEL")
     groq_temperature: float = Field(default=0.7, ge=0.0, le=2.0)
 
     frontend_origin: str = Field(default="http://localhost:5173", validation_alias="FRONTEND_ORIGIN")

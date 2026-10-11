@@ -1,4 +1,6 @@
 from datetime import datetime, timezone
+import json
+import logging
 from uuid import UUID, uuid4
 
 import httpx
@@ -18,6 +20,8 @@ from app.models.schemas import (
 
 router = APIRouter(prefix="/conversation", tags=["Conversation"])
 settings = get_settings()
+logger = logging.getLogger(__name__)
+GROQ_CHAT_COMPLETIONS_URL = "https://api.groq.com/openai/v1/chat/completions"
 SYSTEM_PROMPT = (
     "Tu es iTalk, un tuteur de langues bienveillant et expert en anglais. Ton rôle est d'aider "
     "l'utilisateur à progresser en corrigeant ses erreurs avec tact, en lui posant des questions "
@@ -83,8 +87,15 @@ async def generate_tutor_reply(
             detail="Groq API is not configured",
         )
 
+    model = (settings.groq_model or "").strip()
+    if not model:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Groq model is not configured",
+        )
+
     payload = {
-        "model": settings.groq_model,
+        "model": model,
         "messages": [
             {
                 "role": "system",
@@ -99,12 +110,29 @@ async def generate_tutor_reply(
     }
 
     async with httpx.AsyncClient(timeout=60.0) as client:
-        response = await client.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers={"Authorization": f"Bearer {settings.groq_api_key}"},
-            json=payload,
+        logger.debug(
+            "Groq request URL=%s payload=%s",
+            GROQ_CHAT_COMPLETIONS_URL,
+            json.dumps(payload, ensure_ascii=False),
         )
-        response.raise_for_status()
+        try:
+            response = await client.post(
+                GROQ_CHAT_COMPLETIONS_URL,
+                headers={"Authorization": f"Bearer {settings.groq_api_key}"},
+                json=payload,
+            )
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            logger.error(
+                "Groq request failed: status=%s URL=%s response=%s",
+                exc.response.status_code,
+                GROQ_CHAT_COMPLETIONS_URL,
+                exc.response.text,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Groq API returned HTTP {exc.response.status_code}",
+            ) from exc
         data = response.json()
 
     content = data.get("choices", [{}])[0].get("message", {}).get("content")

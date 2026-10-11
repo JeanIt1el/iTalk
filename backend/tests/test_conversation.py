@@ -3,12 +3,15 @@ import json
 from uuid import uuid4
 
 import httpx
+import pytest
+from fastapi import HTTPException
 
 from app.api import conversation
 from app.models.schemas import ConversationMessageRequest, ConversationSessionCreate, UserContext
 
 
-def test_generate_tutor_reply_uses_groq_model(monkeypatch):
+def test_generate_tutor_reply_uses_groq_model(monkeypatch, caplog):
+    caplog.set_level("DEBUG", logger=conversation.__name__)
     captured_request = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -41,7 +44,7 @@ def test_generate_tutor_reply_uses_groq_model(monkeypatch):
 
     monkeypatch.setattr(conversation.httpx, "AsyncClient", FakeAsyncClient)
     monkeypatch.setattr(conversation.settings, "groq_api_key", "test-key")
-    monkeypatch.setattr(conversation.settings, "groq_model", "llama-3.3-70b-versatile")
+    monkeypatch.setattr(conversation.settings, "groq_model", "openai/gpt-oss-20b")
 
     reply = asyncio.run(
         conversation.generate_tutor_reply(
@@ -55,7 +58,12 @@ def test_generate_tutor_reply_uses_groq_model(monkeypatch):
     )
 
     assert reply == "Je recommande de commencer par une formule simple."
-    assert captured_request["model"] == "llama-3.3-70b-versatile"
+    assert captured_request["model"] == "openai/gpt-oss-20b"
+    assert (
+        "Groq request URL=https://api.groq.com/openai/v1/chat/completions"
+        in caplog.text
+    )
+    assert '"model": "openai/gpt-oss-20b"' in caplog.text
     messages = captured_request["messages"]
     assert "Tu es iTalk, un tuteur de langues bienveillant et expert en anglais." in messages[0]["content"]
     assert "conversation naturelle et stimulante" in messages[0]["content"]
@@ -65,6 +73,51 @@ def test_generate_tutor_reply_uses_groq_model(monkeypatch):
         {"role": "assistant", "content": "Which museum did you enjoy most?"},
     ]
     assert messages[-1] == {"role": "user", "content": "I visited the British Museum last year."}
+
+
+def test_generate_tutor_reply_rejects_empty_groq_model(monkeypatch):
+    monkeypatch.setattr(conversation.settings, "groq_api_key", "test-key")
+    monkeypatch.setattr(conversation.settings, "groq_model", "  ")
+
+    try:
+        asyncio.run(conversation.generate_tutor_reply(messages=[], user_message="Hello"))
+    except Exception as exc:
+        assert getattr(exc, "status_code", None) == 503
+        assert "Groq model is not configured" in str(exc.detail)
+    else:
+        raise AssertionError("Expected an HTTP 503 for an empty Groq model")
+
+
+def test_generate_tutor_reply_logs_groq_error_response(monkeypatch, caplog):
+    caplog.set_level("ERROR", logger=conversation.__name__)
+    error_body = {"error": {"message": "model not found"}}
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, json=error_body)
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs):
+            self._client = httpx.Client(transport=httpx.MockTransport(handler))
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            self._client.close()
+
+        async def post(self, *args, **kwargs):
+            return await asyncio.to_thread(self._client.post, *args, **kwargs)
+
+    monkeypatch.setattr(conversation.httpx, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(conversation.settings, "groq_api_key", "test-key")
+    monkeypatch.setattr(conversation.settings, "groq_model", "openai/gpt-oss-20b")
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(conversation.generate_tutor_reply(messages=[], user_message="Hello"))
+
+    assert exc_info.value.status_code == 502
+    assert "status=404" in caplog.text
+    assert "model not found" in caplog.text
 
 
 def test_send_message_uses_and_persists_session_history(monkeypatch):
