@@ -227,3 +227,4 @@ class UserContext(BaseModel):
     user_id: UUID
     access_token: str
     email: str
+    full_name: str = ""

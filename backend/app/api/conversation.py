@@ -143,6 +143,26 @@ async def start_session(
     payload: ConversationSessionCreate, user: UserContext = Depends(get_current_user)
 ) -> ConversationSession:
     client = _create_supabase_client(user.access_token)
+    profile_response = (
+        client.postgrest.from_("profiles")
+        .select("id")
+        .eq("id", str(user.user_id))
+        .execute()
+    )
+    _raise_for_database_error(profile_response, "Unable to load user profile")
+    if not profile_response.data:
+        profile_insert = client.postgrest.from_("profiles").upsert(
+            {
+                "id": str(user.user_id),
+                "full_name": user.full_name or user.email or "Utilisateur",
+                "native_language": "fr",
+                "target_language": "en",
+                "level": "A1",
+            },
+            on_conflict="id",
+        ).execute()
+        _raise_for_database_error(profile_insert, "Unable to create user profile")
+
     session_id = uuid4()
     started_at = datetime.now(timezone.utc)
     title = payload.title or "Conversation libre"

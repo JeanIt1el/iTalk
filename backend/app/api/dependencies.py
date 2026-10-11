@@ -61,6 +61,8 @@ def get_current_user(
     try:
         user_id = UUID(supabase_user.user.id)
         email = supabase_user.user.email or ""
+        user_metadata = getattr(supabase_user.user, "user_metadata", {}) or {}
+        full_name = user_metadata.get("full_name") or user_metadata.get("name") or ""
     except (TypeError, ValueError, AttributeError) as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -71,6 +73,7 @@ def get_current_user(
         user_id=user_id,
         access_token=token,
         email=email,
+        full_name=full_name,
     )
 
 

@@ -147,24 +147,46 @@ def test_send_message_uses_and_persists_session_history(monkeypatch):
 
 
 def test_start_session_persists_conversation_type_and_selected_scenario(monkeypatch):
-    user = UserContext(user_id=uuid4(), access_token="user-token", email="learner@example.com")
+    user = UserContext(
+        user_id=uuid4(),
+        access_token="user-token",
+        email="learner@example.com",
+        full_name="Learner",
+    )
     inserts = []
 
     class Response:
         error = None
-        data = []
+
+        def __init__(self, data=None):
+            self.data = data or []
 
     class Query:
         def __init__(self, table):
             self.table = table
             self.payload = None
+            self.operation = "select"
+
+        def select(self, *_args, **_kwargs):
+            self.operation = "select"
+            return self
+
+        def eq(self, *_args, **_kwargs):
+            return self
 
         def insert(self, payload):
+            self.operation = "insert"
+            self.payload = payload
+            return self
+
+        def upsert(self, payload, **_kwargs):
+            self.operation = "upsert"
             self.payload = payload
             return self
 
         def execute(self):
-            inserts.append((self.table, self.payload))
+            if self.operation in ("insert", "upsert"):
+                inserts.append((self.table, self.payload))
             return Response()
 
     class Postgrest:
@@ -179,10 +201,20 @@ def test_start_session_persists_conversation_type_and_selected_scenario(monkeypa
         conversation.start_session(ConversationSessionCreate(scenario="free_talk"), user)
     )
 
-    session_insert = inserts[0][1]
-    assert inserts[0][0] == "learning_sessions"
+    profile_insert = inserts[0][1]
+    assert inserts[0][0] == "profiles"
+    assert profile_insert == {
+        "id": str(user.user_id),
+        "full_name": "Learner",
+        "native_language": "fr",
+        "target_language": "en",
+        "level": "A1",
+    }
+
+    session_insert = inserts[1][1]
+    assert inserts[1][0] == "learning_sessions"
     assert session_insert["user_id"] == str(user.user_id)
     assert session_insert["module_type"] == "conversation"
     assert session_insert["scenario"] == "free_talk"
     assert str(session.id) == session_insert["id"]
-    assert inserts[1][0] == "conversation_messages"
+    assert inserts[2][0] == "conversation_messages"
