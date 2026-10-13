@@ -10,6 +10,15 @@ from app.api import conversation
 from app.models.schemas import ConversationMessageRequest, ConversationSessionCreate, UserContext
 
 
+def test_get_scenarios_returns_empty_list():
+    assert asyncio.run(conversation.get_scenarios()) == []
+
+
+def test_conversation_session_rejects_predefined_scenarios():
+    with pytest.raises(ValueError):
+        ConversationSessionCreate(scenario="restaurant")
+
+
 def test_generate_tutor_reply_uses_groq_model(monkeypatch, caplog):
     caplog.set_level("DEBUG", logger=conversation.__name__)
     captured_request = {}
@@ -65,8 +74,9 @@ def test_generate_tutor_reply_uses_groq_model(monkeypatch, caplog):
     )
     assert '"model": "openai/gpt-oss-20b"' in caplog.text
     messages = captured_request["messages"]
-    assert "Tu es iTalk, un tuteur de langues bienveillant et expert en anglais." in messages[0]["content"]
-    assert "conversation naturelle et stimulante" in messages[0]["content"]
+    assert "un véritable partenaire de conversation en anglais" in messages[0]["content"]
+    assert "corrige-la avec tact au fil de ta réponse" in messages[0]["content"]
+    assert "question ouverte pertinente" in messages[0]["content"]
     assert messages[1:4] == [
         {"role": "assistant", "content": "What do you enjoy doing while traveling?"},
         {"role": "user", "content": "I enjoy visiting museums."},
@@ -199,7 +209,7 @@ def test_send_message_uses_and_persists_session_history(monkeypatch):
     assert stored_messages[-1]["content"] == reply.content
 
 
-def test_start_session_persists_conversation_type_and_selected_scenario(monkeypatch):
+def test_start_session_defaults_to_free_talk(monkeypatch):
     user = UserContext(
         user_id=uuid4(),
         access_token="user-token",
@@ -251,7 +261,7 @@ def test_start_session_persists_conversation_type_and_selected_scenario(monkeypa
 
     monkeypatch.setattr(conversation, "_create_supabase_client", lambda _token: Client())
     session = asyncio.run(
-        conversation.start_session(ConversationSessionCreate(scenario="free_talk"), user)
+        conversation.start_session(ConversationSessionCreate(), user)
     )
 
     profile_insert = inserts[0][1]
@@ -269,5 +279,6 @@ def test_start_session_persists_conversation_type_and_selected_scenario(monkeypa
     assert session_insert["user_id"] == str(user.user_id)
     assert session_insert["module_type"] == "conversation"
     assert session_insert["scenario"] == "free_talk"
+    assert session.scenario == "free_talk"
     assert str(session.id) == session_insert["id"]
     assert inserts[2][0] == "conversation_messages"

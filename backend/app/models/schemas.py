@@ -84,7 +84,7 @@ class ConversationScenario(BaseModel):
 
 
 class ConversationSessionCreate(BaseModel):
-    scenario: str
+    scenario: Literal["free_talk"] = "free_talk"
     title: str | None = None
     description: str | None = None
 

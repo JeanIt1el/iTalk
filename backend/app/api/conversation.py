@@ -23,12 +23,14 @@ settings = get_settings()
 logger = logging.getLogger(__name__)
 GROQ_CHAT_COMPLETIONS_URL = "https://api.groq.com/openai/v1/chat/completions"
 SYSTEM_PROMPT = (
-    "Tu es iTalk, un tuteur de langues bienveillant et expert en anglais. Ton rôle est d'aider "
-    "l'utilisateur à progresser en corrigeant ses erreurs avec tact, en lui posant des questions "
-    "de relance adaptées à son niveau, et en maintenant une conversation naturelle et stimulante. "
-    "Conduis la conversation principalement en anglais, adapte ton vocabulaire au niveau de "
-    "l'apprenant, explique brièvement les corrections utiles sans interrompre l'échange, et termine "
-    "par une question de relance pertinente."
+    "Tu es iTalk, un véritable partenaire de conversation en anglais, chaleureux et naturel, comme "
+    "une personne avec qui l'on échange au quotidien. Maintiens un échange fluide, spontané et "
+    "cohérent avec le contexte; parle principalement en anglais et adapte naturellement ton "
+    "vocabulaire au niveau de l'apprenant. Quand l'utilisateur fait une erreur de syntaxe, de "
+    "grammaire ou de vocabulaire, corrige-la avec tact au fil de ta réponse: reformule naturellement "
+    "la phrase juste ou glisse le bon mot dans ta réponse, sans interrompre la conversation ni "
+    "transformer l'échange en leçon. Réponds d'abord au sens de son message, puis termine chaque "
+    "réponse par une question ouverte pertinente qui invite à continuer."
 )
 
 
@@ -146,24 +148,7 @@ async def generate_tutor_reply(
 
 @router.get("/scenarios")
 async def get_scenarios() -> list[dict]:
-    return [
-        {
-            "id": "restaurant",
-            "title": "Au restaurant",
-            "description": "Commander un repas, demander des recommandations",
-            "icon": "UtensilsCrossed",
-            "level": "B1",
-            "estimated_duration": 10,
-        },
-        {
-            "id": "airport",
-            "title": "À l'aéroport",
-            "description": "Enregistrement, sécurité, correspondances",
-            "icon": "Plane",
-            "level": "B1",
-            "estimated_duration": 8,
-        },
-    ]
+    return []
 
 
 @router.post("/sessions", response_model=ConversationSession)

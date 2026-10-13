@@ -52,7 +52,7 @@ def test_authenticated_routes_require_real_user_context():
 def test_conversation_and_speech_contracts_protect_user_context():
     response = client.post(
         "/api/v1/conversation/sessions",
-        json={"scenario": "restaurant"},
+        json={},
     )
     assert response.status_code == 401
 

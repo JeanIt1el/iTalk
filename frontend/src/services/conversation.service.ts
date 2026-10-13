@@ -2,38 +2,10 @@ import type {
   ConversationMessage,
   ConversationSession,
   ConversationScenario,
-  ConversationScenarioInfo,
   ConversationSummary,
   ConversationCorrection,
 } from '@/types/conversation';
 import { apiGet, apiPost } from './api-client';
-
-const DEFAULT_SCENARIOS: ConversationScenarioInfo[] = [
-  {
-    id: 'restaurant',
-    title: 'Commande au restaurant',
-    description: 'Commandez un repas et demandez des recommandations.',
-    icon: 'UtensilsCrossed',
-    level: 'B1',
-    estimatedDuration: 10,
-  },
-  {
-    id: 'airport',
-    title: 'Voyage',
-    description: 'Pratiquez les échanges utiles pendant un voyage.',
-    icon: 'Plane',
-    level: 'B1',
-    estimatedDuration: 8,
-  },
-  {
-    id: 'free_talk',
-    title: 'Discussion libre',
-    description: 'Discutez librement d’un sujet de votre choix.',
-    icon: 'MessageCircle',
-    level: 'B1',
-    estimatedDuration: 10,
-  },
-];
 
 function responseArray<T>(response: unknown): T[] {
   let value = response;
@@ -88,31 +60,8 @@ function mapSummary(summary: Record<string, unknown>): ConversationSummary {
 }
 
 export const conversationService = {
-  async getScenarios(): Promise<ConversationScenarioInfo[]> {
-    let response: unknown;
-    try {
-      response = await apiGet<unknown>('/conversation/scenarios');
-    } catch {
-      return DEFAULT_SCENARIOS.map((scenario) => ({ ...scenario }));
-    }
-    const scenarios = responseArray<Record<string, unknown>>(response)
-      .filter((scenario) => scenario && typeof scenario === 'object')
-      .map((scenario) => ({
-        id: String(scenario.id) as ConversationScenario,
-        title: String(scenario.title),
-        description: String(scenario.description),
-        icon: String(scenario.icon),
-        level: scenario.level as ConversationScenarioInfo['level'],
-        estimatedDuration: Number(scenario.estimated_duration),
-      }))
-      .filter((scenario) => scenario.id && scenario.title !== 'undefined');
-    return scenarios.length
-      ? scenarios
-      : DEFAULT_SCENARIOS.map((scenario) => ({ ...scenario }));
-  },
-
-  async startSession(scenario: ConversationScenario): Promise<ConversationSession> {
-    const session = await apiPost<Record<string, unknown>>('/conversation/sessions', { scenario });
+  async startSession(): Promise<ConversationSession> {
+    const session = await apiPost<Record<string, unknown>>('/conversation/sessions', {});
     return mapSession(session);
   },
 

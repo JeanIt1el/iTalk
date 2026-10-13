@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { Send, Languages, Sparkles, X, RotateCcw, Flag, ChevronRight } from 'lucide-react';
+import { Send, Languages, Sparkles, RotateCcw, Flag, MessageCircle } from 'lucide-react';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { AIMessageBubble } from '@/components/conversation/AIMessageBubble';
 import { LearnerMessageBubble } from '@/components/conversation/LearnerMessageBubble';
@@ -19,17 +19,24 @@ import type {
   ConversationCorrection,
   ConversationSummary,
   ConversationScenarioInfo,
-  ConversationScenario,
 } from '@/types/conversation';
 import { useLearningStore } from '@/stores/useLearningStore';
 import { useToast } from '@/hooks/use-toast';
-import { cn } from '@/lib/utils';
+
+const FREE_TALK_SCENARIO: ConversationScenarioInfo = {
+  id: 'free_talk',
+  title: 'Conversation libre',
+  description: 'Échangez spontanément sur le sujet de votre choix.',
+  icon: 'MessageCircle',
+  level: 'B1',
+  estimatedDuration: 10,
+};
 
 export function ConversationPage() {
   const { showTranslations, setShowTranslations } = useLearningStore();
   const { toast } = useToast();
-  const [scenarios, setScenarios] = useState<ConversationScenarioInfo[]>([]);
   const [selectedScenario, setSelectedScenario] = useState<ConversationScenarioInfo | null>(null);
+  const [isStarting, setIsStarting] = useState(true);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [input, setInput] = useState('');
@@ -41,29 +48,41 @@ export function ConversationPage() {
   const [enableCorrections, setEnableCorrections] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
-
-  useEffect(() => {
-    conversationService.getScenarios().then(setScenarios);
-  }, []);
+  const autoStartAttemptedRef = useRef(false);
+  const startInProgressRef = useRef(false);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isTyping]);
 
-  const startSession = useCallback(async (scenario: ConversationScenarioInfo) => {
+  const startSession = useCallback(async () => {
+    if (startInProgressRef.current) return;
+    startInProgressRef.current = true;
+    setIsStarting(true);
     setSummary(null);
     setShowSummary(false);
     setCorrections([]);
     setSuggestions([]);
     try {
-      const session = await conversationService.startSession(scenario.id);
-      setSelectedScenario(scenario);
+      const session = await conversationService.startSession();
+      setSelectedScenario(FREE_TALK_SCENARIO);
       setSessionId(session.id);
       setMessages(session.messages);
     } catch {
+      setSelectedScenario(null);
+      setSessionId(null);
       toast('Impossible de démarrer la conversation. Vérifiez votre connexion puis réessayez.', { variant: 'error' });
+    } finally {
+      startInProgressRef.current = false;
+      setIsStarting(false);
     }
   }, [toast]);
+
+  useEffect(() => {
+    if (autoStartAttemptedRef.current) return;
+    autoStartAttemptedRef.current = true;
+    void startSession();
+  }, [startSession]);
 
   const handleSend = useCallback(async (text?: string) => {
     const content = text ?? input.trim();
@@ -125,14 +144,14 @@ export function ConversationPage() {
   }, [toast, sessionId]);
 
   const handleRestart = useCallback(() => {
-    setSelectedScenario(null);
     setSessionId(null);
     setMessages([]);
     setSummary(null);
     setShowSummary(false);
     setCorrections([]);
     setSuggestions([]);
-  }, []);
+    void startSession();
+  }, [startSession]);
 
   return (
     <div className="mx-auto max-w-2xl space-y-4">
@@ -141,33 +160,23 @@ export function ConversationPage() {
         subtitle="Pratiquez votre anglais avec un partenaire IA"
       />
 
-      {!selectedScenario ? (
-        /* Scenario selection */
-        <div className="space-y-3">
-          <h2 className="text-sm font-semibold text-muted-foreground">Choisissez un scénario</h2>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            {scenarios.map((scenario) => (
-              <button
-                key={scenario.id}
-                onClick={() => startSession(scenario)}
-                className="group flex items-start gap-3 rounded-xl border border-border bg-card p-4 text-left transition-all hover:border-primary/30 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary transition-transform group-hover:scale-110">
-                  <Sparkles className="h-5 w-5" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <h3 className="font-semibold text-foreground">{scenario.title}</h3>
-                  <p className="mt-0.5 text-xs text-muted-foreground">{scenario.description}</p>
-                  <div className="mt-2 flex items-center gap-2">
-                    <span className="text-[0.65rem] font-semibold text-primary">{scenario.level}</span>
-                    <span className="text-[0.65rem] text-muted-foreground">· {scenario.estimatedDuration} min</span>
-                  </div>
-                </div>
-                <ChevronRight className="h-4 w-4 text-muted-foreground transition-transform group-hover:translate-x-1" />
-              </button>
-            ))}
-          </div>
+      {isStarting ? (
+        <div className="flex min-h-64 flex-col items-center justify-center gap-3 text-center" role="status">
+          <MessageCircle className="h-8 w-8 animate-pulse text-primary" />
+          <p className="text-sm text-muted-foreground">Préparation de votre conversation libre…</p>
         </div>
+      ) : !selectedScenario || !sessionId ? (
+        <EmptyState
+          icon={<MessageCircle className="h-7 w-7" />}
+          title="Conversation indisponible"
+          description="La session n'a pas pu démarrer. Réessayez dans un instant."
+          action={(
+            <Button onClick={() => void startSession()}>
+              <RotateCcw className="mr-2 h-4 w-4" />
+              Réessayer
+            </Button>
+          )}
+        />
       ) : showSummary && summary ? (
         /* Session summary */
         <SessionSummary summary={summary} onRestart={handleRestart} onClose={() => setShowSummary(false)} />
