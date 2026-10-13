@@ -16,6 +16,13 @@ def test_conversation_session_route_is_registered_at_api_prefix():
     assert "/api/v1/conversation/sessions" in app.openapi()["paths"]
 
 
+def test_reading_routes_are_removed():
+    paths = app.openapi()["paths"]
+    assert not any(path.startswith("/api/v1/reading") for path in paths)
+    assert "/api/v1/learning/reading" not in paths
+    assert "/api/v1/learning/reading/progress" not in paths
+
+
 def test_authentication_requires_supabase_configuration():
     response = client.post(
         "/api/v1/auth/login",
@@ -39,7 +46,6 @@ def test_missing_or_invalid_tokens_are_rejected():
 def test_authenticated_routes_require_real_user_context():
     endpoints = [
         "/api/v1/learning/modules",
-        "/api/v1/reading/contents",
         "/api/v1/vocabulary/items",
         "/api/v1/progress/overview",
     ]

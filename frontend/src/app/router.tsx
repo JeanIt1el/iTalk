@@ -4,7 +4,6 @@ import { OnboardingPage } from '@/pages/OnboardingPage';
 import { HomePage } from '@/pages/HomePage';
 import { ModulesPage } from '@/pages/ModulesPage';
 import { ConversationPage } from '@/pages/ConversationPage';
-import { ReadingPage } from '@/pages/ReadingPage';
 import { GrammarPage } from '@/pages/GrammarPage';
 import { VocabularyPage } from '@/pages/VocabularyPage';
 import { SpeakingPage } from '@/pages/SpeakingPage';
@@ -26,7 +25,6 @@ export const router = createBrowserRouter([
       { path: 'home', element: <HomePage /> },
       { path: 'modules', element: <ModulesPage /> },
       { path: 'conversation', element: <ConversationPage /> },
-      { path: 'reading', element: <ReadingPage /> },
       { path: 'grammar', element: <GrammarPage /> },
       { path: 'vocabulary', element: <VocabularyPage /> },
       { path: 'speaking', element: <SpeakingPage /> },

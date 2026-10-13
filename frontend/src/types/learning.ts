@@ -1,6 +1,6 @@
 import type { CEFRLevel, SkillType } from './user';
 
-export type ModuleCategory = 'conversation' | 'reading' | 'grammar' | 'vocabulary' | 'speaking' | 'listening';
+export type ModuleCategory = 'conversation' | 'grammar' | 'vocabulary' | 'speaking' | 'listening';
 
 export type ModuleDifficulty = 'beginner' | 'intermediate' | 'advanced';
 
@@ -84,35 +84,6 @@ export interface GrammarResult {
   overallScore: number;
   improvedVersion: string;
   explanation: string;
-}
-
-export interface ReadingText {
-  id: string;
-  title: string;
-  author: string;
-  level: CEFRLevel;
-  content: string;
-  wordCount: number;
-  estimatedReadingTime: number;
-  topic: string;
-  difficultWords: DifficultWord[];
-  audioUrl: string | null;
-}
-
-export interface DifficultWord {
-  word: string;
-  translation: string;
-  phonetic: string;
-  definition: string;
-  example: string;
-}
-
-export interface ReadingProgress {
-  textId: string;
-  progress: number;
-  timeSpent: number;
-  wordsRead: number;
-  isCompleted: boolean;
 }
 
 export interface DailyActivity {

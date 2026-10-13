@@ -7,8 +7,6 @@ from app.api.dependencies import _create_supabase_client, get_current_user, get_
 from app.models.schemas import (
     LearningSessionComplete,
     LearningSessionCreate,
-    ReadingContent,
-    ReadingProgressRequest,
     UserContext,
     VocabularyItem,
 )
@@ -194,52 +192,6 @@ def review_vocabulary(
         "next_review": next_review.isoformat(),
         "srs_level": next_level,
     }
-
-
-@router.get("/reading", response_model=list[ReadingContent])
-def get_reading_texts(user: UserContext = Depends(get_current_user)) -> list[ReadingContent]:
-    client = _create_supabase_client(user.access_token)
-    response = (
-        client.postgrest.from_("reading_contents")
-        .select("id, title, level, topic, content")
-        .execute()
-    )
-    if getattr(response, "error", None):
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unable to load reading content")
-    return [
-        ReadingContent(
-            id=UUID(item["id"]),
-            title=item["title"],
-            author="",
-            level=item["level"],
-            content=item["content"],
-            word_count=len(item["content"].split()),
-            estimated_reading_time=0,
-            topic=item["topic"],
-            difficult_words=[],
-            audio_url=None,
-        )
-        for item in response.data
-    ]
-
-
-@router.patch("/reading/progress")
-async def update_reading_progress(
-    payload: ReadingProgressRequest, user: UserContext = Depends(get_current_user)
-) -> dict:
-    client = _create_supabase_client(user.access_token)
-    progress = {
-        "user_id": str(user.user_id),
-        "text_id": payload.text_id,
-        **payload.model_dump(exclude={"text_id"}),
-        "updated_at": datetime.now(timezone.utc).isoformat(),
-    }
-    response = client.postgrest.from_("reading_progress").upsert(
-        progress,
-        on_conflict="user_id,text_id",
-    ).execute()
-    _raise_for_database_error(response, "Unable to save reading progress")
-    return response.data[0] if response.data else progress
 
 
 @router.post("/grammar")

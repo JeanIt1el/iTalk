@@ -3,7 +3,6 @@ import type {
   Lesson,
   VocabularyItem,
   VocabularyCollection,
-  ReadingText,
   GrammarResult,
 } from '@/types/learning';
 
@@ -22,22 +21,6 @@ export const mockModules: LearningModule[] = [
     lessonsCount: 5,
     completedLessons: 2,
     progress: 40,
-    isLocked: false,
-  },
-  {
-    id: 'mod-002',
-    title: 'Lecture : L\'histoire de Londres',
-    description: 'Un texte sur l\'histoire fascinante de la capitale britannique.',
-    category: 'reading',
-    skill: 'reading',
-    level: 'B1',
-    topic: 'Culture',
-    durationMinutes: 15,
-    difficulty: 'intermediate',
-    thumbnailColor: 'secondary',
-    lessonsCount: 4,
-    completedLessons: 1,
-    progress: 25,
     isLocked: false,
   },
   {
@@ -118,22 +101,6 @@ export const mockModules: LearningModule[] = [
     lessonsCount: 6,
     completedLessons: 1,
     progress: 17,
-    isLocked: false,
-  },
-  {
-    id: 'mod-008',
-    title: 'Lecture : Article technologique',
-    description: 'Lisez et comprenez un article sur les nouvelles technologies.',
-    category: 'reading',
-    skill: 'reading',
-    level: 'B2',
-    topic: 'Technologie',
-    durationMinutes: 18,
-    difficulty: 'advanced',
-    thumbnailColor: 'secondary',
-    lessonsCount: 4,
-    completedLessons: 0,
-    progress: 0,
     isLocked: false,
   },
   {
@@ -425,62 +392,6 @@ export const mockVocabularyItems: VocabularyItem[] = [
     srsLevel: 2,
     nextReview: '2026-09-15T10:00:00Z',
     lastReviewed: '2026-09-11T10:00:00Z',
-  },
-];
-
-export const mockReadingTexts: ReadingText[] = [
-  {
-    id: 'read-001',
-    title: 'The Hidden History of London',
-    author: 'James Whitfield',
-    level: 'B1',
-    topic: 'Culture',
-    wordCount: 320,
-    estimatedReadingTime: 5,
-    content: `London is one of the oldest and most fascinating cities in the world. Its history stretches back over two thousand years, from its founding by the Romans as Londinium to its modern status as a global metropolis.
-
-The Romans established Londinium around 43 AD, building a bridge across the Thames and constructing walls that would define the city's boundaries for centuries. After the Romans left, the city was abandoned for a time, but it gradually grew again under the Saxons.
-
-In 1066, William the Conqueror invaded England and built the Tower of London, which still stands today. The Tower has served as a palace, a prison, and even a zoo over the centuries.
-
-The Great Fire of 1666 destroyed much of the medieval city, but it also created an opportunity to rebuild London with better architecture and wider streets. Sir Christopher Wren designed the new St Paul's Cathedral, which became an iconic symbol of the city.
-
-In the 19th century, London became the largest city in the world. The Industrial Revolution brought railways, factories, and millions of new residents. The London Underground, opened in 1863, was the first underground railway in the world.
-
-Today, London is a vibrant mix of old and new. Ancient churches stand beside modern skyscrapers. Traditional markets coexist with high-tech startups. It remains a city that constantly reinvents itself while honoring its past.`,
-    difficultWords: [
-      { word: 'founding', translation: 'fondation', phonetic: '/ˈfaʊndɪŋ/', definition: 'the establishment or origin', example: 'The founding of the city dates back to Roman times.' },
-      { word: 'abandoned', translation: 'abandonné', phonetic: '/əˈbændənd/', definition: 'left empty or deserted', example: 'The village was abandoned after the flood.' },
-      { word: 'metropolis', translation: 'métropole', phonetic: '/mɪˈtrɒpəlɪs/', definition: 'a very large and busy city', example: 'Tokyo is a modern metropolis.' },
-      { word: 'coexist', translation: 'coexister', phonetic: '/ˌkoʊɪɡˈzɪst/', definition: 'to exist together at the same time', example: 'Different cultures coexist in the city.' },
-      { word: 'reinvents', translation: 'se réinvente', phonetic: '/ˌriːɪnˈvɛnts/', definition: 'to remake or redo something completely', example: 'The artist reinvents his style every album.' },
-    ],
-    audioUrl: null,
-  },
-  {
-    id: 'read-002',
-    title: 'The Rise of Artificial Intelligence',
-    author: 'Sarah Chen',
-    level: 'B2',
-    topic: 'Technologie',
-    wordCount: 280,
-    estimatedReadingTime: 4,
-    content: `Artificial intelligence has transformed the way we live and work. From voice assistants on our phones to recommendation algorithms on streaming services, AI is everywhere.
-
-Machine learning, a subset of AI, allows computers to learn from data without being explicitly programmed. This technology powers everything from spam filters to self-driving cars.
-
-Natural language processing enables machines to understand and generate human language. This is the technology behind translation apps, chatbots, and writing assistants.
-
-Despite its benefits, AI raises important ethical questions. Who is responsible when an AI system makes a mistake? How do we prevent bias in algorithms? These are challenges that society must address.
-
-The future of AI will likely involve more collaboration between humans and machines. Rather than replacing us, AI will augment our abilities and help us solve complex problems.`,
-    difficultWords: [
-      { word: 'subset', translation: 'sous-ensemble', phonetic: '/ˈsʌbsɛt/', definition: 'a part of a larger group', example: 'Machine learning is a subset of AI.' },
-      { word: 'explicitly', translation: 'explicitement', phonetic: '/ɪkˈsplɪsɪtli/', definition: 'in a clear and direct way', example: 'The rules were explicitly stated.' },
-      { word: 'augment', translation: 'augmenter, compléter', phonetic: '/ɔːɡˈmɛnt/', definition: 'to make something greater or more complete', example: 'AI augments human capabilities.' },
-      { word: 'bias', translation: 'biais', phonetic: '/ˈbaɪəs/', definition: 'a preference or prejudice', example: 'We must prevent bias in algorithms.' },
-    ],
-    audioUrl: null,
   },
 ];
 

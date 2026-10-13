@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 
 CEFR_LEVEL = Literal["A1", "A2", "B1", "B2", "C1", "C2"]
 SKILL_TYPE = Literal[
-    "conversation", "reading", "grammar", "vocabulary", "speaking", "listening"
+    "conversation", "grammar", "vocabulary", "speaking", "listening"
 ]
 MESSAGE_ROLE = Literal["user", "assistant", "system"]
 
@@ -154,27 +154,6 @@ class VocabularyItem(BaseModel):
     srs_level: int = Field(ge=0, le=5)
     next_review: datetime
     last_reviewed: datetime | None = None
-
-
-class ReadingContent(BaseModel):
-    id: UUID = Field(default_factory=uuid4)
-    title: str
-    author: str = ""
-    level: CEFR_LEVEL
-    content: str
-    word_count: int
-    estimated_reading_time: int
-    topic: str
-    difficult_words: list[dict]
-    audio_url: str | None = None
-
-
-class ReadingProgressRequest(BaseModel):
-    text_id: str
-    progress: int = Field(ge=0, le=100)
-    time_spent: int = Field(ge=0)
-    words_read: int = Field(ge=0)
-    is_completed: bool = False
 
 
 class VocabularyItemCreate(BaseModel):

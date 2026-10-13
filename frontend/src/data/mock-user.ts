@@ -3,7 +3,6 @@ import type { UserProfile, UserPreferences } from '@/types/user';
 export const mockUserPreferences: UserPreferences = {
   showTranslations: true,
   autoPlayAudio: false,
-  textSize: 'medium',
   reducedMotion: false,
   notifications: {
     dailyReminder: true,

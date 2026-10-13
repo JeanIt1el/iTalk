@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Flame, Target, Clock, TrendingUp, MessageCircle, BookOpen, PenLine, Mic, Sparkles, ChevronRight, Calendar } from 'lucide-react';
+import { Flame, Target, Clock, TrendingUp, MessageCircle, PenLine, Mic, Sparkles, ChevronRight, Calendar } from 'lucide-react';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { ProgressCard } from '@/components/shared/ProgressCard';
 import { ModuleCard } from '@/components/shared/ModuleCard';
@@ -16,14 +16,12 @@ import { SKILL_LABELS } from '@/lib/constants';
 
 const skillIcons: Record<string, typeof MessageCircle> = {
   conversation: MessageCircle,
-  reading: BookOpen,
   grammar: PenLine,
   speaking: Mic,
 };
 
 const skillPaths: Record<string, string> = {
   conversation: '/conversation',
-  reading: '/reading',
   grammar: '/grammar',
   speaking: '/speaking',
 };
@@ -116,8 +114,8 @@ export function HomePage() {
       {/* Quick actions */}
       <div>
         <h2 className="mb-3 text-sm font-semibold text-muted-foreground">Accès rapide</h2>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          {(['conversation', 'reading', 'grammar', 'speaking'] as const).map((skill) => {
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+          {(['conversation', 'grammar', 'speaking'] as const).map((skill) => {
             const Icon = skillIcons[skill];
             return (
               <Link

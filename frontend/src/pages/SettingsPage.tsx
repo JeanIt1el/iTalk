@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Settings, Moon, Sun, Monitor, Bell, Lock, Eye, Type, Globe, Trash2, Download, LogOut } from 'lucide-react';
+import { Settings, Moon, Sun, Monitor, Bell, Lock, Eye, Globe, Trash2, Download, LogOut } from 'lucide-react';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
@@ -15,7 +15,7 @@ import { cn } from '@/lib/utils';
 
 export function SettingsPage() {
   const { theme, setTheme } = useThemeStore();
-  const { showTranslations, textSize, setShowTranslations, setTextSize, dailyGoalMinutes, setDailyGoalMinutes } = useLearningStore();
+  const { showTranslations, setShowTranslations, dailyGoalMinutes, setDailyGoalMinutes } = useLearningStore();
   const { user, logout } = useAuthStore();
   const { toast } = useToast();
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
@@ -36,12 +36,6 @@ export function SettingsPage() {
     { value: 'light', label: 'Clair', icon: Sun },
     { value: 'dark', label: 'Sombre', icon: Moon },
     { value: 'system', label: 'Système', icon: Monitor },
-  ];
-
-  const textSizeOptions: { value: 'small' | 'medium' | 'large'; label: string }[] = [
-    { value: 'small', label: 'Petit' },
-    { value: 'medium', label: 'Moyen' },
-    { value: 'large', label: 'Grand' },
   ];
 
   return (
@@ -79,27 +73,6 @@ export function SettingsPage() {
             </div>
           </div>
 
-          {/* Text size */}
-          <div>
-            <Label className="text-sm font-medium">Taille du texte de lecture</Label>
-            <div className="mt-2 flex items-center gap-2">
-              <Type className="h-4 w-4 text-muted-foreground" />
-              <div className="flex gap-2">
-                {textSizeOptions.map((opt) => (
-                  <button
-                    key={opt.value}
-                    onClick={() => setTextSize(opt.value)}
-                    className={cn(
-                      'rounded-lg border px-3 py-1.5 text-xs font-medium transition-all',
-                      textSize === opt.value ? 'border-primary bg-primary text-primary-foreground' : 'border-border hover:border-primary/30',
-                    )}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
         </div>
       </section>
 

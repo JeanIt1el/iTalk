@@ -45,7 +45,6 @@ export const INTEREST_OPTIONS = [
 
 export const SKILL_LABELS: Record<string, string> = {
   conversation: 'Conversation',
-  reading: 'Lecture',
   grammar: 'Grammaire',
   vocabulary: 'Vocabulaire',
   speaking: 'Expression orale',
@@ -54,7 +53,6 @@ export const SKILL_LABELS: Record<string, string> = {
 
 export const SKILL_ICONS: Record<string, string> = {
   conversation: 'MessageCircle',
-  reading: 'BookOpen',
   grammar: 'PenLine',
   vocabulary: 'Layers',
   speaking: 'Mic',
@@ -71,7 +69,6 @@ export const NAV_ITEMS = [
 
 export const SIDEBAR_ITEMS = [
   ...NAV_ITEMS,
-  { path: '/reading', label: 'Lecture', icon: 'BookOpen' },
   { path: '/grammar', label: 'Grammaire', icon: 'PenLine' },
   { path: '/vocabulary', label: 'Vocabulaire', icon: 'Layers' },
   { path: '/speaking', label: 'Expression orale', icon: 'Mic' },

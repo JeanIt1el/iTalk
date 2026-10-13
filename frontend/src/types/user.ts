@@ -16,7 +16,7 @@ export type LearningPace = 'casual' | 'regular' | 'intensive';
 
 export type ThemePreference = 'light' | 'dark' | 'system';
 
-export type SkillType = 'conversation' | 'reading' | 'grammar' | 'vocabulary' | 'speaking' | 'listening';
+export type SkillType = 'conversation' | 'grammar' | 'vocabulary' | 'speaking' | 'listening';
 
 export interface UserProfile {
   id: string;
@@ -39,7 +39,6 @@ export interface UserProfile {
 export interface UserPreferences {
   showTranslations: boolean;
   autoPlayAudio: boolean;
-  textSize: 'small' | 'medium' | 'large';
   reducedMotion: boolean;
   notifications: {
     dailyReminder: boolean;

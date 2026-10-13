@@ -4,8 +4,6 @@ import type {
   VocabularyItem,
   VocabularyCollection,
   GrammarResult,
-  ReadingText,
-  ReadingProgress,
   SrsRating,
 } from '@/types/learning';
 import type { CEFRLevel, SkillType } from '@/types/user';
@@ -189,43 +187,6 @@ export const learningService = {
       lastReviewed: new Date().toISOString(),
       nextReview: String(result.next_review),
     };
-  },
-
-  async getReadingTexts(level?: CEFRLevel): Promise<ReadingText[]> {
-    let response: unknown;
-    try {
-      response = await apiGet<unknown>('/reading/contents');
-    } catch {
-      return [];
-    }
-    return responseArray<Record<string, unknown>>(response).map((text) => ({
-      id: String(text.id),
-      title: String(text.title),
-      author: String(text.author ?? ''),
-      level: text.level as ReadingText['level'],
-      content: String(text.content),
-      wordCount: Number(text.word_count),
-      estimatedReadingTime: Number(text.estimated_reading_time),
-      topic: String(text.topic),
-      difficultWords: (text.difficult_words as ReadingText['difficultWords']) ?? [],
-      audioUrl: text.audio_url ? String(text.audio_url) : null,
-    })).filter((text) => !level || text.level === level);
-  },
-
-  async getReadingText(id: string): Promise<ReadingText | null> {
-    const texts = await this.getReadingTexts();
-    return texts.find((text) => text.id === id) ?? null;
-  },
-
-  async updateReadingProgress(progress: ReadingProgress): Promise<ReadingProgress> {
-    await apiPatch('/learning/reading/progress', {
-      text_id: progress.textId,
-      progress: progress.progress,
-      time_spent: progress.timeSpent,
-      words_read: progress.wordsRead,
-      is_completed: progress.isCompleted,
-    });
-    return progress;
   },
 
   async checkGrammar(text: string): Promise<GrammarResult> {
