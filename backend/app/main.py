@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api import (
     auth,
     conversation,
+    grammar,
     learning,
     profile,
     progress,
@@ -32,6 +33,7 @@ app.add_middleware(
 app.include_router(auth.router, prefix=settings.api_prefix)
 app.include_router(profile.router, prefix=settings.api_prefix)
 app.include_router(conversation.router, prefix=settings.api_prefix)
+app.include_router(grammar.router, prefix=settings.api_prefix)
 app.include_router(learning.router, prefix=settings.api_prefix)
 app.include_router(vocabulary.router, prefix=settings.api_prefix)
 app.include_router(progress.router, prefix=settings.api_prefix)

@@ -12,7 +12,6 @@ import {
   mockModules,
   mockLessons,
   mockVocabularyCollections,
-  mockGrammarResult,
 } from '@/data/mock-learning';
 
 function responseArray<T>(response: unknown, property?: string): T[] {
@@ -189,9 +188,44 @@ export const learningService = {
     };
   },
 
-  async checkGrammar(text: string): Promise<GrammarResult> {
-    await delay(800);
-    return { ...mockGrammarResult, originalText: text };
+  async checkGrammar(text: string, level: CEFRLevel = 'B1'): Promise<GrammarResult> {
+    const response = await apiPost<{
+      id: string;
+      original_text: string;
+      corrected_text: string;
+      mistakes: Array<{
+        id: string;
+        original_text: string;
+        corrected_text: string;
+        explanation: string;
+        category: GrammarResult['mistakes'][number]['category'];
+        start_index: number;
+        end_index: number;
+      }>;
+      category_scores: GrammarResult['categoryScores'];
+      overall_score: number;
+      improved_version: string;
+      explanation: string;
+    }>('/learning/grammar', { text, level });
+
+    return {
+      id: response.id,
+      originalText: response.original_text,
+      correctedText: response.corrected_text,
+      mistakes: response.mistakes.map((mistake) => ({
+        id: mistake.id,
+        originalText: mistake.original_text,
+        correctedText: mistake.corrected_text,
+        explanation: mistake.explanation,
+        category: mistake.category,
+        startIndex: mistake.start_index,
+        endIndex: mistake.end_index,
+      })),
+      categoryScores: response.category_scores,
+      overallScore: response.overall_score,
+      improvedVersion: response.improved_version,
+      explanation: response.explanation,
+    };
   },
 
   async getTopics(): Promise<string[]> {

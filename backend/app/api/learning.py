@@ -1,9 +1,14 @@
 from datetime import datetime, timedelta, timezone
+import json
+from typing import Literal
 from uuid import UUID, uuid4
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, Field, ValidationError
 
 from app.api.dependencies import _create_supabase_client, get_current_user, get_user_id
+from app.core.config import get_settings
 from app.models.schemas import (
     LearningSessionComplete,
     LearningSessionCreate,
@@ -12,6 +17,37 @@ from app.models.schemas import (
 )
 
 router = APIRouter(prefix="/learning", tags=["Learning"])
+settings = get_settings()
+GROQ_CHAT_COMPLETIONS_URL = "https://api.groq.com/openai/v1/chat/completions"
+
+GrammarCategory = Literal["spelling", "grammar", "punctuation", "word_choice", "syntax"]
+
+
+class GrammarCheckRequest(BaseModel):
+    text: str = Field(min_length=3, max_length=5000)
+    level: Literal["A1", "A2", "B1", "B2", "C1", "C2"] = "B1"
+
+
+class GrammarMistakeDraft(BaseModel):
+    original_text: str = Field(min_length=1)
+    corrected_text: str = Field(min_length=1)
+    explanation: str = Field(min_length=1)
+    category: GrammarCategory
+
+
+class GrammarCategoryScores(BaseModel):
+    spelling: int = Field(ge=0, le=100)
+    grammar: int = Field(ge=0, le=100)
+    punctuation: int = Field(ge=0, le=100)
+    word_choice: int = Field(ge=0, le=100)
+    syntax: int = Field(ge=0, le=100)
+
+
+class GrammarAnalysis(BaseModel):
+    mistakes: list[GrammarMistakeDraft]
+    category_scores: GrammarCategoryScores
+    improved_version: str = Field(min_length=1)
+    explanation: str = Field(min_length=1)
 
 
 def _raise_for_database_error(response, detail: str) -> None:
@@ -195,14 +231,81 @@ def review_vocabulary(
 
 
 @router.post("/grammar")
-async def check_grammar(text: str, user_id: UUID = Depends(get_user_id)) -> dict:
+async def check_grammar(
+    request: GrammarCheckRequest, user_id: UUID = Depends(get_user_id)
+) -> dict:
+    if not settings.groq_api_key or not settings.groq_model.strip():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Groq is not configured",
+        )
+
+    system_prompt = (
+        "Analyse ce texte d'apprenant en anglais avec précision, sans inventer d'erreur. "
+        "Réponds uniquement en JSON avec les clés mistakes, category_scores, improved_version, explanation. "
+        "Chaque mistake doit contenir original_text (sous-chaîne exacte et contiguë du texte), corrected_text, "
+        "explanation (en français, contexte et règle), category parmi spelling, grammar, punctuation, "
+        "word_choice, syntax. category_scores doit donner un entier 0-100 pour chaque catégorie. "
+        "L'explication générale doit résumer les tendances et priorités de progrès. Conserve le sens et le registre. "
+        "Pour un texte correct, retourne mistakes vide, scores à 100 et une explication positive. "
+    )
+    payload = {
+        "model": settings.groq_model,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {
+                "role": "user",
+                "content": f"Niveau CECR de l'apprenant : {request.level}.\nTexte à analyser :\n{request.text}",
+            },
+        ],
+        "temperature": 0.1,
+        "response_format": {"type": "json_object"},
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.post(
+                GROQ_CHAT_COMPLETIONS_URL,
+                headers={"Authorization": f"Bearer {settings.groq_api_key}"},
+                json=payload,
+            )
+            response.raise_for_status()
+        content = response.json()["choices"][0]["message"]["content"]
+        analysis = GrammarAnalysis.model_validate(json.loads(content))
+    except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError, ValidationError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Unable to analyse grammar text",
+        ) from exc
+
+    mistakes = []
+    search_from = 0
+    for mistake in analysis.mistakes:
+        start_index = request.text.find(mistake.original_text, search_from)
+        if start_index < 0:
+            start_index = request.text.find(mistake.original_text)
+        if start_index < 0:
+            continue
+        end_index = start_index + len(mistake.original_text)
+        search_from = end_index
+        mistakes.append(
+            {
+                "id": str(uuid4()),
+                **mistake.model_dump(),
+                "start_index": start_index,
+                "end_index": end_index,
+            }
+        )
+
+    category_scores = analysis.category_scores.model_dump()
+    overall_score = round(sum(category_scores.values()) / len(category_scores))
     return {
         "id": str(uuid4()),
-        "original_text": text,
-        "corrected_text": text,
-        "mistakes": [],
-        "category_scores": {"spelling": 100, "grammar": 100, "punctuation": 100, "word_choice": 100, "syntax": 100},
-        "overall_score": 100,
-        "improved_version": text,
-        "explanation": "Aucune erreur détectée dans le texte fourni.",
+        "original_text": request.text,
+        "corrected_text": analysis.improved_version,
+        "mistakes": mistakes,
+        "category_scores": category_scores,
+        "overall_score": overall_score,
+        "improved_version": analysis.improved_version,
+        "explanation": analysis.explanation,
     }
