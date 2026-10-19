@@ -162,6 +162,148 @@ class VocabularyItemCreate(BaseModel):
     context_sentence: str | None = Field(default=None, max_length=2000)
 
 
+class VocabularyWordResponse(BaseModel):
+    slug: str
+    word: str
+    translation_fr: str
+    additional_meanings: list[str] = Field(default_factory=list)
+    part_of_speech: str
+    cefr_level: CEFR_LEVEL
+    ipa: str | None = None
+    example_en: str
+    example_fr: str
+    usage_note_fr: str | None = None
+    synonyms: list[str] = Field(default_factory=list)
+    antonyms: list[str] = Field(default_factory=list)
+    collocations: list[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
+    source_type: Literal["seeded", "ai_generated"] = "seeded"
+    mastery_level: int = Field(default=0, ge=0, le=5)
+    next_review_at: datetime | None = None
+    is_favorite: bool = False
+
+
+class VocabularyCollectionResponse(BaseModel):
+    slug: str
+    title: str
+    description: str
+    icon: str
+    cefr_level: CEFR_LEVEL
+    word_count: int = Field(ge=0)
+    mastered_count: int = Field(ge=0)
+
+
+class VocabularyReviewRequest(BaseModel):
+    item_slug: str = Field(min_length=1, max_length=120)
+    rating: Literal["again", "hard", "good", "easy"]
+    request_id: UUID = Field(default_factory=uuid4)
+
+
+class VocabularyReviewResponse(BaseModel):
+    item_slug: str
+    rating: Literal["again", "hard", "good", "easy"]
+    mastery_level: int = Field(ge=0, le=5)
+    next_review_at: datetime
+    duplicate: bool = False
+
+
+QUIZ_QUESTION_TYPE = Literal["multiple_choice", "write_word", "fill_blank"]
+
+
+class VocabularyQuizCreateRequest(BaseModel):
+    collection_slug: str | None = Field(default=None, max_length=120)
+    level: CEFR_LEVEL | None = None
+    count: int = Field(default=10, ge=3, le=20)
+    question_types: list[QUIZ_QUESTION_TYPE] = Field(
+        default_factory=lambda: ["multiple_choice", "write_word", "fill_blank"],
+        min_length=1,
+        max_length=3,
+    )
+
+
+class VocabularyQuizQuestion(BaseModel):
+    index: int = Field(ge=0)
+    type: QUIZ_QUESTION_TYPE
+    prompt: str
+    options: list[str] = Field(default_factory=list)
+
+
+class VocabularyQuizResponse(BaseModel):
+    id: UUID
+    questions: list[VocabularyQuizQuestion]
+    answered_count: int = Field(ge=0)
+    status: Literal["active", "completed", "abandoned"]
+    score: int | None = Field(default=None, ge=0, le=100)
+
+
+class VocabularyQuizAnswerRequest(BaseModel):
+    question_index: int = Field(ge=0)
+    answer: str = Field(min_length=1, max_length=300)
+
+
+class VocabularyQuizAnswerResponse(BaseModel):
+    question_index: int
+    is_correct: bool
+    correct_answer: str
+    explanation: str
+
+
+class VocabularyScenarioResponse(BaseModel):
+    slug: str
+    title: str
+    description: str
+    cefr_level: CEFR_LEVEL
+    learning_objective: str
+    situation: str
+    useful_phrases: list[str]
+    words: list[VocabularyWordResponse] = Field(default_factory=list)
+
+
+class GeneratedVocabularyWord(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    word: str = Field(min_length=1, max_length=100)
+    translation_fr: str = Field(min_length=1, max_length=200)
+    part_of_speech: str = Field(min_length=1, max_length=40)
+    cefr_level: CEFR_LEVEL
+    ipa: str = Field(default="", max_length=100)
+    example_en: str = Field(min_length=1, max_length=300)
+    example_fr: str = Field(min_length=1, max_length=300)
+    usage_note_fr: str = Field(min_length=1, max_length=500)
+    synonyms: list[str] = Field(default_factory=list, max_length=5)
+    tags: list[str] = Field(default_factory=list, max_length=8)
+
+
+class VocabularyGenerateRequest(BaseModel):
+    topic: str = Field(min_length=2, max_length=120)
+    level: CEFR_LEVEL
+    count: int = Field(default=8, ge=3, le=10)
+    goal: str = Field(default="", max_length=300)
+
+
+class VocabularyGenerateResponse(BaseModel):
+    items: list[GeneratedVocabularyWord]
+    source_type: Literal["ai_generated"] = "ai_generated"
+
+
+class SavedGeneratedVocabularyWord(GeneratedVocabularyWord):
+    id: UUID
+    created_at: datetime
+    source_type: Literal["ai_generated"] = "ai_generated"
+
+
+class VocabularyExplainRequest(BaseModel):
+    word: str = Field(min_length=1, max_length=100)
+    translation_fr: str = Field(min_length=1, max_length=200)
+    comparison_word: str | None = Field(default=None, max_length=100)
+
+
+class VocabularyExplainResponse(BaseModel):
+    explanation_fr: str = Field(min_length=1, max_length=1500)
+    examples: list[str] = Field(min_length=1, max_length=4)
+    common_mistake_fr: str = Field(min_length=1, max_length=500)
+
+
 class LearningSessionCreate(BaseModel):
     module_type: SKILL_TYPE
     scenario: str | None = None

@@ -1,6 +1,12 @@
+import re
+from pathlib import Path
+
+import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
 from app.main import app
+from app.models.schemas import GeneratedVocabularyWord, VocabularyGenerateRequest, VocabularyQuizCreateRequest
 
 
 client = TestClient(app)
@@ -252,3 +258,217 @@ def test_conversation_and_speech_contracts_protect_user_context():
         json={"transcript": "Bonjour", "duration": 1, "pronunciation_score": 90},
     )
     assert response.status_code == 401
+
+
+def test_vocabulary_routes_require_authenticated_user():
+    expected_routes = {
+        "/api/v1/vocabulary/collections",
+        "/api/v1/vocabulary/words",
+        "/api/v1/vocabulary/search",
+        "/api/v1/vocabulary/review/due",
+        "/api/v1/vocabulary/progress",
+        "/api/v1/vocabulary/favorites",
+        "/api/v1/vocabulary/scenarios",
+        "/api/v1/vocabulary/ai/generate",
+        "/api/v1/vocabulary/ai/explain",
+        "/api/v1/vocabulary/ai/saved",
+    }
+    assert expected_routes <= set(app.openapi()["paths"])
+
+    for path in (
+        "/api/v1/vocabulary/collections",
+        "/api/v1/vocabulary/words",
+        "/api/v1/vocabulary/review/due",
+        "/api/v1/vocabulary/progress",
+        "/api/v1/vocabulary/favorites",
+        "/api/v1/vocabulary/scenarios",
+        "/api/v1/vocabulary/ai/saved",
+    ):
+        response = client.get(path)
+        assert response.status_code == 401
+
+    response = client.post(
+        "/api/v1/vocabulary/ai/generate",
+        json={"topic": "travel", "level": "A2", "count": 5},
+    )
+    assert response.status_code == 401
+
+
+def test_vocabulary_generation_and_quiz_limits_are_validated():
+    with pytest.raises(ValidationError):
+        VocabularyGenerateRequest(topic="x", level="A1", count=30)
+    with pytest.raises(ValidationError):
+        VocabularyQuizCreateRequest(count=2)
+
+
+def test_vocabulary_ai_word_schema_rejects_unexpected_fields():
+    item = GeneratedVocabularyWord(
+        word="figure out",
+        translation_fr="comprendre",
+        part_of_speech="phrasal verb",
+        cefr_level="B1",
+        example_en="I figured out the answer.",
+        example_fr="J'ai compris la réponse.",
+        usage_note_fr="Trouver une réponse après réflexion.",
+    )
+    assert item.ipa == ""
+    with pytest.raises(ValidationError):
+        GeneratedVocabularyWord.model_validate({
+            **item.model_dump(),
+            "provider_secret": "must never be accepted",
+        })
+
+
+def test_vocabulary_ai_requires_groq_configuration(monkeypatch):
+    from uuid import uuid4
+
+    from app.api import vocabulary
+    from app.api.dependencies import get_current_user
+    from app.models.schemas import UserContext
+
+    user = UserContext(user_id=uuid4(), access_token="test-token", email="test@example.com")
+    monkeypatch.setitem(app.dependency_overrides, get_current_user, lambda: user)
+    monkeypatch.setattr(vocabulary.settings, "groq_api_key", "")
+    response = client.post(
+        "/api/v1/vocabulary/ai/generate",
+        json={"topic": "travel", "level": "A2", "count": 5},
+    )
+    assert response.status_code == 503
+
+
+def test_vocabulary_ai_provider_failure_is_generic_and_secret_safe(monkeypatch):
+    import httpx
+    from uuid import uuid4
+
+    from app.api import vocabulary
+    from app.api.dependencies import get_current_user
+    from app.models.schemas import UserContext
+
+    user = UserContext(user_id=uuid4(), access_token="test-token", email="test@example.com")
+    monkeypatch.setitem(app.dependency_overrides, get_current_user, lambda: user)
+    monkeypatch.setattr(vocabulary.settings, "groq_api_key", "private-test-key")
+
+    class FakeRpc:
+        def execute(self):
+            return type("RpcResult", (), {"error": None, "data": 1})()
+
+    class FakeSupabase:
+        def rpc(self, *_args, **_kwargs):
+            return FakeRpc()
+
+    class FailingAsyncClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def post(self, *_args, **_kwargs):
+            raise httpx.ConnectError("provider unavailable")
+
+    monkeypatch.setattr(vocabulary, "_create_supabase_client", lambda _token: FakeSupabase())
+    monkeypatch.setattr(vocabulary.httpx, "AsyncClient", lambda **_kwargs: FailingAsyncClient())
+    response = client.post(
+        "/api/v1/vocabulary/ai/generate",
+        json={"topic": "travel", "level": "A2", "count": 5},
+    )
+
+    assert response.status_code == 502
+    assert "private-test-key" not in response.text
+    assert "provider unavailable" not in response.text
+
+
+def test_vocabulary_ai_accepts_validated_generated_words(monkeypatch):
+    import json
+    from uuid import uuid4
+
+    from app.api import vocabulary
+    from app.api.dependencies import get_current_user
+    from app.models.schemas import UserContext
+
+    user = UserContext(user_id=uuid4(), access_token="test-token", email="test@example.com")
+    monkeypatch.setitem(app.dependency_overrides, get_current_user, lambda: user)
+    monkeypatch.setattr(vocabulary.settings, "groq_api_key", "private-test-key")
+
+    generated_items = [
+        {
+            "word": f"travel word {index}",
+            "translation_fr": f"traduction {index}",
+            "part_of_speech": "noun",
+            "cefr_level": "A2",
+            "ipa": "",
+            "example_en": f"We use travel word {index}.",
+            "example_fr": f"Nous utilisons le mot {index}.",
+            "usage_note_fr": "Vocabulaire de voyage.",
+            "synonyms": [],
+            "tags": ["travel"],
+        }
+        for index in range(3)
+    ]
+
+    class FakeRpc:
+        def execute(self):
+            return type("RpcResult", (), {"error": None, "data": 1})()
+
+    class FakeSupabase:
+        def rpc(self, *_args, **_kwargs):
+            return FakeRpc()
+
+    class FakeResponse:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"choices": [{"message": {"content": json.dumps({"items": generated_items})}}]}
+
+    class FakeAsyncClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def post(self, *_args, **_kwargs):
+            return FakeResponse()
+
+    monkeypatch.setattr(vocabulary, "_create_supabase_client", lambda _token: FakeSupabase())
+    monkeypatch.setattr(vocabulary.httpx, "AsyncClient", lambda **_kwargs: FakeAsyncClient())
+    response = client.post(
+        "/api/v1/vocabulary/ai/generate",
+        json={"topic": "travel", "level": "A2", "count": 3},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["source_type"] == "ai_generated"
+    assert len(response.json()["items"]) == 3
+    assert "private-test-key" not in response.text
+
+
+def test_vocabulary_free_answer_normalization_is_case_and_space_safe():
+    from app.api.vocabulary import _normalize_answer
+
+    assert _normalize_answer("  FIGURE   OUT. ") == "figure out"
+    assert _normalize_answer("figure it out") != _normalize_answer("figure out")
+
+
+def test_vocabulary_seed_is_a1_a2_sized_and_idempotent():
+    migration = Path(__file__).parents[1] / "supabase" / "migrations" / "20261012_vocabulary_module.sql"
+    sql = migration.read_text(encoding="utf-8")
+    seed = sql.split("insert into public.vocabulary_catalog_items", 1)[1].split(
+        "on conflict (slug) do nothing;", 1
+    )[0]
+    rows = re.findall(r"^\('[a-z0-9-]+',", seed, flags=re.MULTILINE)
+    assert len(rows) == 120
+    assert sql.count("on conflict (slug) do nothing;") >= 2
+    assert "create table if not exists public.vocabulary_favorites" in sql
+    assert "create table if not exists public.vocabulary_generated_words" in sql
+    assert "create table if not exists public.vocabulary_user_progress" in sql
+    assert "alter table public.vocabulary_favorites enable row level security" in sql
+    assert "alter table public.vocabulary_generated_words enable row level security" in sql
+    assert "create or replace function public.record_vocabulary_review" in sql
+    assert "security definer" in sql
+    assert "auth.uid() <> p_user_id" in sql
+    assert "interval '10 minutes'" in sql
+    assert "unique (user_id, request_id)" in sql
+    assert "create table if not exists public.vocabulary_quiz_answer_keys" in sql
+    assert "where public.vocabulary_ai_daily_usage.request_count < 20" in sql
