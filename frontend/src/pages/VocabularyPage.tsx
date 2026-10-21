@@ -38,6 +38,7 @@ import type {
   VocabularyProgress,
   VocabularyQuiz,
   VocabularyQuizFeedback,
+  VocabularyQuizHistoryItem,
   VocabularyQuizQuestionType,
   VocabularyRating,
   VocabularyScenario,
@@ -65,7 +66,13 @@ const ratings: Array<{ value: VocabularyRating; label: string; className: string
   { value: 'easy', label: 'Facile', className: 'border-success/40 text-success hover:bg-success/5' },
 ];
 
-const quizTypes: VocabularyQuizQuestionType[] = ['multiple_choice', 'write_word', 'fill_blank'];
+const quizModes: Array<{ value: VocabularyQuizQuestionType; label: string }> = [
+  { value: 'synonym', label: 'Trouver le synonyme' },
+  { value: 'translation_match', label: 'Association mot-traduction' },
+  { value: 'fill_blank', label: 'Compléter la phrase' },
+  { value: 'scramble', label: 'Lettres mélangées' },
+  { value: 'odd_one_out', label: 'Jeu de l’intrus' },
+];
 
 function getLevelClass(level: CEFRLevel): string {
   if (level.startsWith('A')) return 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300';
@@ -88,6 +95,10 @@ function speakEnglish(text: string, onError: () => void) {
 export function VocabularyPage() {
   const { toast } = useToast();
   const reviewRequestIds = useRef(new Map<string, { requestId: string; rating: VocabularyRating }>());
+  const toastRef = useRef(toast);
+  toastRef.current = toast;
+  const quizDeadline = useRef<number | null>(null);
+  const quizFinishRequest = useRef(false);
   const [activeTab, setActiveTab] = useState<VocabularyTab>('collections');
   const [level, setLevel] = useState<CEFRLevel | 'all'>('all');
   const [search, setSearch] = useState('');
@@ -98,6 +109,7 @@ export function VocabularyPage() {
   const [favorites, setFavorites] = useState<VocabularyWord[]>([]);
   const [savedGeneratedWords, setSavedGeneratedWords] = useState<SavedGeneratedVocabularyWord[]>([]);
   const [dueWords, setDueWords] = useState<VocabularyWord[]>([]);
+  const [mistakeWords, setMistakeWords] = useState<VocabularyWord[]>([]);
   const [scenarios, setScenarios] = useState<VocabularyScenario[]>([]);
   const [progress, setProgress] = useState<VocabularyProgress | null>(null);
   const [loading, setLoading] = useState(true);
@@ -109,6 +121,7 @@ export function VocabularyPage() {
   const [collectionWords, setCollectionWords] = useState<VocabularyWord[]>([]);
   const [collectionLoading, setCollectionLoading] = useState(false);
   const [selectedWord, setSelectedWord] = useState<VocabularyWord | null>(null);
+  const [relatedWords, setRelatedWords] = useState<VocabularyWord[]>([]);
   const [wordExplanation, setWordExplanation] = useState<VocabularyExplanation | null>(null);
   const [explaining, setExplaining] = useState(false);
   const [studyWords, setStudyWords] = useState<VocabularyWord[]>([]);
@@ -122,12 +135,66 @@ export function VocabularyPage() {
   const [quizFeedback, setQuizFeedback] = useState<VocabularyQuizFeedback | null>(null);
   const [quizLoading, setQuizLoading] = useState(false);
   const [quizFinishing, setQuizFinishing] = useState(false);
+  const [quizMode, setQuizMode] = useState<VocabularyQuizQuestionType>('translation_match');
+  const [quizTimeLimit, setQuizTimeLimit] = useState<60 | 120 | null>(null);
+  const [quizRemaining, setQuizRemaining] = useState<number | null>(null);
+  const [quizHistory, setQuizHistory] = useState<VocabularyQuizHistoryItem[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const [aiTopic, setAiTopic] = useState('Voyage et transports');
   const [aiLevel, setAiLevel] = useState<CEFRLevel>('A2');
   const [aiCount, setAiCount] = useState(8);
   const [generatedWords, setGeneratedWords] = useState<GeneratedVocabularyWord[]>([]);
   const [generating, setGenerating] = useState(false);
   const [savingGeneratedSlug, setSavingGeneratedSlug] = useState<string | null>(null);
+
+  const activeQuizId = quiz?.status === 'active' ? quiz.id : null;
+  const activeQuizTimeLimit = quiz?.status === 'active' ? quiz.timeLimitSeconds : null;
+
+  useEffect(() => {
+    if (!activeQuizId || activeQuizTimeLimit === null) {
+      quizDeadline.current = null;
+      setQuizRemaining(null);
+      return;
+    }
+    if (quizDeadline.current === null) {
+      quizDeadline.current = Date.now() + activeQuizTimeLimit * 1000;
+      quizFinishRequest.current = false;
+    }
+    const updateRemaining = () => {
+      const remaining = Math.max(0, Math.ceil((quizDeadline.current! - Date.now()) / 1000));
+      setQuizRemaining(remaining);
+      if (remaining === 0 && !quizFinishRequest.current) {
+        quizFinishRequest.current = true;
+        setQuizFinishing(true);
+        vocabularyService.finishQuiz(activeQuizId)
+          .then((finishedQuiz) => {
+            setQuiz(finishedQuiz);
+            void vocabularyService.getQuizHistory().then(setQuizHistory).catch(() => undefined);
+          })
+          .catch(() => {
+            toastRef.current('Le temps est écoulé. Impossible d’enregistrer le score pour le moment.', { variant: 'error' });
+          })
+          .finally(() => setQuizFinishing(false));
+      }
+    };
+    updateRemaining();
+    const timerId = window.setInterval(updateRemaining, 250);
+    return () => window.clearInterval(timerId);
+  }, [activeQuizId, activeQuizTimeLimit]);
+
+  const selectedWordSlug = selectedWord?.slug;
+  useEffect(() => {
+    if (!selectedWordSlug) {
+      setRelatedWords([]);
+      return;
+    }
+    let current = true;
+    setRelatedWords([]);
+    vocabularyService.getRelatedWords(selectedWordSlug)
+      .then((items) => { if (current) setRelatedWords(items); })
+      .catch(() => { if (current) setRelatedWords([]); });
+    return () => { current = false; };
+  }, [selectedWordSlug]);
 
   useEffect(() => {
     let current = true;
@@ -205,10 +272,23 @@ export function VocabularyPage() {
       let current = true;
       setListError('');
       setListLoading(true);
-      vocabularyService.getDueReviews()
-        .then((items) => { if (current) setDueWords(items); })
+      Promise.all([vocabularyService.getDueReviews(), vocabularyService.getMistakeWords()])
+        .then(([dueItems, mistakes]) => {
+          if (!current) return;
+          setDueWords(dueItems);
+          setMistakeWords(mistakes);
+        })
         .catch(() => { if (current) setListError('Impossible de charger les révisions dues.'); })
         .finally(() => { if (current) setListLoading(false); });
+      return () => { current = false; };
+    }
+    if (activeTab === 'quiz') {
+      let current = true;
+      setHistoryLoading(true);
+      vocabularyService.getQuizHistory()
+        .then((items) => { if (current) setQuizHistory(items); })
+        .catch(() => { if (current) setQuizHistory([]); })
+        .finally(() => { if (current) setHistoryLoading(false); });
       return () => { current = false; };
     }
     if (activeTab === 'saved') {
@@ -330,6 +410,8 @@ export function VocabularyPage() {
   const handleCreateQuiz = async () => {
     setQuizLoading(true);
     setQuiz(null);
+    quizDeadline.current = null;
+    quizFinishRequest.current = false;
     setQuizFeedback(null);
     setQuizIndex(0);
     try {
@@ -337,10 +419,15 @@ export function VocabularyPage() {
         collectionSlug: selectedCollection?.slug,
         level: level === 'all' ? undefined : level,
         count: 10,
-        questionTypes: quizTypes,
+        questionTypes: [quizMode],
+        timeLimitSeconds: quizTimeLimit ?? undefined,
       });
       setQuiz(session);
+      quizDeadline.current = session.timeLimitSeconds === null
+        ? null
+        : Date.parse(session.startedAt) + session.timeLimitSeconds * 1000;
       setQuizAnswer('');
+      void vocabularyService.getQuizHistory().then(setQuizHistory).catch(() => undefined);
     } catch {
       toast('Impossible de créer le quiz. Vérifiez qu’il existe assez de mots dans ce niveau.', { variant: 'error' });
     } finally {
@@ -375,7 +462,9 @@ export function VocabularyPage() {
     if (!quiz) return;
     setQuizFinishing(true);
     try {
-      setQuiz(await vocabularyService.finishQuiz(quiz.id));
+      const finishedQuiz = await vocabularyService.finishQuiz(quiz.id);
+      setQuiz(finishedQuiz);
+      void vocabularyService.getQuizHistory().then(setQuizHistory).catch(() => undefined);
     } catch {
       toast('Terminez toutes les questions avant de calculer le score.', { variant: 'warning' });
     } finally {
@@ -498,6 +587,8 @@ export function VocabularyPage() {
           <ProgressStat label="Maîtrisés" value={progress.masteredCount} />
           <ProgressStat label="À réviser" value={progress.dueCount} highlight={progress.dueCount > 0} />
           <ProgressStat label="Favoris" value={progress.favoriteCount} />
+          <ProgressStat label="Bonnes réponses" value={progress.successes} />
+          <ProgressStat label="Erreurs" value={progress.failures} highlight={progress.failures > 0} />
         </section>
       )}
 
@@ -552,8 +643,9 @@ export function VocabularyPage() {
         </TabsContent>
 
         <TabsContent value="reviews" className="mt-5 space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-sm font-semibold text-foreground">Révisions dues</h2><p className="mt-1 text-xs text-muted-foreground">Échéances calculées et enregistrées pour votre compte.</p></div><Button onClick={() => beginStudy(dueWords)} disabled={!dueWords.length}><RotateCw className="mr-2 h-4 w-4" />Réviser tout</Button></div>
+          <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-sm font-semibold text-foreground">Révisions dues</h2><p className="mt-1 text-xs text-muted-foreground">Échéances calculées et enregistrées pour votre compte.</p></div><Button onClick={() => beginStudy([...new Map([...dueWords, ...mistakeWords].map((word) => [word.slug, word])).values()])} disabled={!dueWords.length && !mistakeWords.length}><RotateCw className="mr-2 h-4 w-4" />Réviser tout</Button></div>
           {listLoading ? <LoadingMessage /> : <WordList words={dueWords.filter((word) => matchesSearch(word, search))} onChoose={openWord} onFavorite={(word) => void handleFavorite(word)} onSpeak={(word) => speakEnglish(word, () => toast('La synthèse vocale est indisponible.', { variant: 'warning' }))} emptyTitle="Aucune révision due" emptyDescription="Les mots arriveront ici selon leur prochaine date de révision." />}
+          {!listLoading && mistakeWords.length > 0 && <section className="space-y-3 border-t border-border pt-4"><div><h3 className="text-sm font-semibold">Erreurs à retravailler</h3><p className="mt-1 text-xs text-muted-foreground">Mots manqués dans vos quiz, enregistrés pour votre compte.</p></div><WordList words={mistakeWords.filter((word) => matchesSearch(word, search))} onChoose={openWord} onFavorite={(word) => void handleFavorite(word)} onSpeak={(word) => speakEnglish(word, () => toast('La synthèse vocale est indisponible.', { variant: 'warning' }))} emptyTitle="Aucune erreur correspondante" /><Button variant="outline" size="sm" onClick={() => beginStudy(mistakeWords)}><RotateCw className="mr-2 h-4 w-4" />Réviser les erreurs</Button></section>}
         </TabsContent>
 
         <TabsContent value="favorites" className="mt-5 space-y-4">
@@ -574,24 +666,29 @@ export function VocabularyPage() {
         </TabsContent>
 
         <TabsContent value="quiz" className="mt-5">
+          <section className="mb-6 space-y-3 border-b border-border pb-5"><h2 className="text-sm font-semibold">Historique des scores</h2>{historyLoading ? <LoadingMessage /> : quizHistory.length ? <div className="divide-y divide-border border-y border-border">{quizHistory.map((item) => <div key={item.id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm"><span>{new Date(item.startedAt).toLocaleDateString('fr-FR')} · {item.answeredCount}/{item.questionCount} réponses</span><span className="font-semibold tabular-nums">{item.score === null ? 'En cours' : `${item.score}/100`}</span></div>)}</div> : <p className="text-sm text-muted-foreground">Aucun quiz enregistré pour le moment.</p>}</section>
           {!quiz ? (
             <section className="mx-auto max-w-xl space-y-4 border-y border-border py-6">
               <div><h2 className="text-lg font-semibold">Quiz de vocabulaire</h2><p className="mt-1 text-sm text-muted-foreground">Questions tirées du catalogue publié, corrigées côté serveur.</p></div>
               <p className="text-sm text-muted-foreground">{selectedCollection ? `Collection : ${selectedCollection.title}` : level === 'all' ? 'Tous les niveaux' : `Niveau ${level}`}</p>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="space-y-1 text-sm"><span className="font-medium">Jeu</span><select value={quizMode} onChange={(event) => setQuizMode(event.target.value as VocabularyQuizQuestionType)} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm">{quizModes.map((mode) => <option key={mode.value} value={mode.value}>{mode.label}</option>)}</select></label>
+                <label className="space-y-1 text-sm"><span className="font-medium">Chronométré</span><select value={quizTimeLimit ?? ''} onChange={(event) => setQuizTimeLimit(event.target.value === '' ? null : Number(event.target.value) as 60 | 120)} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"><option value="">Sans limite</option><option value={60}>60 secondes</option><option value={120}>120 secondes</option></select></label>
+              </div>
               <Button onClick={() => void handleCreateQuiz()} disabled={quizLoading}>{quizLoading ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Préparation…</> : 'Créer un quiz de 10 questions'}</Button>
             </section>
           ) : quiz.status === 'completed' ? (
             <section className="mx-auto max-w-xl space-y-4 border-y border-border py-8 text-center"><Check className="mx-auto h-9 w-9 text-success" /><h2 className="text-xl font-semibold">Quiz terminé</h2><p className="text-4xl font-bold tabular-nums text-primary">{quiz.score ?? 0}<span className="text-lg text-muted-foreground">/100</span></p><Button onClick={() => setQuiz(null)}>Nouveau quiz</Button></section>
           ) : currentQuizQuestion ? (
             <section className="mx-auto max-w-xl space-y-5 border-y border-border py-5">
-              <div className="flex items-center justify-between text-sm text-muted-foreground"><span>Question {quizIndex + 1} / {quiz.questions.length}</span><span>{quiz.answeredCount} réponses</span></div>
+              <div className="flex items-center justify-between text-sm text-muted-foreground"><span>Question {quizIndex + 1} / {quiz.questions.length}</span><span>{quizRemaining === null ? `${quiz.answeredCount} réponses` : `${Math.floor(quizRemaining / 60)}:${String(quizRemaining % 60).padStart(2, '0')}`}</span></div>
               <Progress value={(quizIndex / quiz.questions.length) * 100} />
               <h2 className="text-lg font-semibold leading-7">{currentQuizQuestion.prompt}</h2>
               {currentQuizQuestion.options.length ? (
                 <fieldset className="space-y-2"><legend className="sr-only">Choisir une réponse</legend>{currentQuizQuestion.options.map((option) => <label key={option} className={cn('flex cursor-pointer items-center gap-3 rounded-md border px-3 py-3 text-sm', quizAnswer === option ? 'border-primary bg-primary/5' : 'border-border')}><input type="radio" name="vocabulary-quiz-answer" checked={quizAnswer === option} onChange={() => setQuizAnswer(option)} />{option}</label>)}</fieldset>
               ) : <Input value={quizAnswer} onChange={(event) => setQuizAnswer(event.target.value)} placeholder="Votre réponse en anglais" aria-label="Votre réponse" />}
               {quizFeedback && <div role="status" className={cn('rounded-md border p-3 text-sm', quizFeedback.isCorrect ? 'border-success/30 bg-success/5 text-success' : 'border-amber-500/30 bg-amber-500/5 text-foreground')}><p className="font-semibold">{quizFeedback.isCorrect ? 'Bonne réponse.' : `Réponse : ${quizFeedback.correctAnswer}`}</p><p className="mt-1 text-muted-foreground">{quizFeedback.explanation}</p></div>}
-              <div className="flex flex-wrap gap-2">{!quizFeedback ? <Button onClick={() => void handleSubmitQuizAnswer()} disabled={!quizAnswer.trim() || quizLoading}>{quizLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}Valider</Button> : quizIndex < quiz.questions.length - 1 ? <Button onClick={handleNextQuizQuestion}>Question suivante<ChevronRight className="ml-2 h-4 w-4" /></Button> : <Button onClick={() => void handleFinishQuiz()} disabled={quizFinishing}>{quizFinishing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}Terminer et voir le score</Button>}</div>
+              <div className="flex flex-wrap gap-2">{quizRemaining === 0 ? <Button onClick={() => void handleFinishQuiz()} disabled={quizFinishing}>{quizFinishing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}Terminer et voir le score</Button> : !quizFeedback ? <Button onClick={() => void handleSubmitQuizAnswer()} disabled={!quizAnswer.trim() || quizLoading}>{quizLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}Valider</Button> : quizIndex < quiz.questions.length - 1 ? <Button onClick={handleNextQuizQuestion}>Question suivante<ChevronRight className="ml-2 h-4 w-4" /></Button> : <Button onClick={() => void handleFinishQuiz()} disabled={quizFinishing}>{quizFinishing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}Terminer et voir le score</Button>}</div>
             </section>
           ) : null}
         </TabsContent>
@@ -606,7 +703,7 @@ export function VocabularyPage() {
             </div>
             <Button onClick={() => void handleGenerate()} disabled={generating || aiTopic.trim().length < 2}>{generating ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Génération…</> : <><Sparkles className="mr-2 h-4 w-4" />Générer</>}</Button>
           </section>
-          {generatedWords.length > 0 && <section className="space-y-3"><h3 className="text-sm font-semibold">Propositions générées · non vérifiées</h3><div className="grid gap-3 sm:grid-cols-2">{generatedWords.map((word) => {
+          {generatedWords.length > 0 && <section className="space-y-3"><h3 className="text-sm font-semibold">{generatedWords[0].sourceType === 'catalog_fallback' ? 'Suggestions du catalogue' : 'Propositions générées · non vérifiées'}</h3><div className="grid gap-3 sm:grid-cols-2">{generatedWords.map((word) => {
             const saved = savedGeneratedWords.some((item) => item.word.toLocaleLowerCase() === word.word.toLocaleLowerCase());
             return <GeneratedWordCard key={`${word.word}-${word.cefrLevel}`} word={word} saved={saved} saving={savingGeneratedSlug === word.word} onSave={() => void handleSaveGeneratedWord(word)} onSpeak={() => speakEnglish(word.word, () => toast('La synthèse vocale est indisponible.', { variant: 'warning' }))} />;
           })}</div></section>}
@@ -623,9 +720,14 @@ export function VocabularyPage() {
             <div className="border-y border-border py-3"><p className="font-medium">{selectedWord.exampleEn}</p><p className="mt-1 text-muted-foreground">{selectedWord.exampleFr}</p></div>
             {selectedWord.usageNoteFr && <p className="leading-6 text-muted-foreground">{selectedWord.usageNoteFr}</p>}
             {selectedWord.collocations.length > 0 && <p><span className="font-medium">Associations : </span><span className="text-muted-foreground">{selectedWord.collocations.join(' · ')}</span></p>}
-            {selectedWord.synonyms.length > 0 && <p><span className="font-medium">Synonymes : </span><span className="text-muted-foreground">{selectedWord.synonyms.join(' · ')}</span></p>}
+            {selectedWord.synonyms.length > 0 && <div><p className="font-medium">Synonymes et nuances</p><ul className="mt-2 space-y-2">{selectedWord.synonyms.map((synonym) => {
+              const detail = selectedWord.synonymDetails.find((item) => item.word === synonym);
+              const registerLabels = { familiar: 'Familier', neutral: 'Neutre', formal: 'Formel', academic: 'Académique' };
+              return <li key={synonym} className="flex flex-wrap items-baseline gap-x-2 gap-y-1"><span className="font-medium">{synonym}</span><span className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">{detail ? registerLabels[detail.register] : 'Registre à préciser'}</span>{detail?.nuanceFr && <span className="text-muted-foreground">{detail.nuanceFr}</span>}</li>;
+            })}</ul></div>}
             {selectedWord.antonyms.length > 0 && <p><span className="font-medium">Antonymes : </span><span className="text-muted-foreground">{selectedWord.antonyms.join(' · ')}</span></p>}
-            <details className="border-t border-border pt-3"><summary className="cursor-pointer font-medium">Explication personnalisée par IA</summary><div className="pt-3"><Button size="sm" variant="outline" disabled={explaining} onClick={() => void handleExplain()}>{explaining ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}Expliquer ce mot</Button>{wordExplanation && <div className="mt-3 space-y-3"><p className="leading-6">{wordExplanation.explanationFr}</p>{wordExplanation.examples.map((example) => <p key={example} className="border-l-2 border-primary/30 pl-3 text-muted-foreground">{example}</p>)}<p className="text-amber-700 dark:text-amber-300">Erreur fréquente : {wordExplanation.commonMistakeFr}</p></div>}</div></details>
+            {relatedWords.length > 0 && <div className="border-t border-border pt-3"><p className="font-medium">Fiches liées</p><div className="mt-2 divide-y divide-border">{relatedWords.map((word) => <button key={word.slug} type="button" className="flex w-full items-center justify-between gap-3 py-2 text-left" onClick={() => openWord(word)}><span><span className="font-medium">{word.word}</span><span className="ml-2 text-sm text-muted-foreground">{word.translationFr}</span></span><ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" /></button>)}</div></div>}
+            <details className="border-t border-border pt-3"><summary className="cursor-pointer font-medium">Explication personnalisée par IA</summary><div className="pt-3"><Button size="sm" variant="outline" disabled={explaining} onClick={() => void handleExplain()}>{explaining ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}Expliquer ce mot</Button>{wordExplanation && <div className="mt-3 space-y-3"><p className="text-xs text-muted-foreground">{wordExplanation.sourceType === 'catalog_fallback' ? 'Mode catalogue : Groq indisponible' : 'Explication générée par Groq'}</p><p className="leading-6">{wordExplanation.explanationFr}</p>{wordExplanation.examples.map((example) => <p key={example} className="border-l-2 border-primary/30 pl-3 text-muted-foreground">{example}</p>)}<p className="text-amber-700 dark:text-amber-300">Erreur fréquente : {wordExplanation.commonMistakeFr}</p></div>}</div></details>
           </div>
         </DialogContent>}
       </Dialog>

@@ -27,6 +27,16 @@ def _create_supabase_client(access_token: str | None = None) -> Client:
     return create_client(settings.supabase_url, public_key, options=options)
 
 
+def _create_supabase_admin_client() -> Client:
+    """Create a backend-only client for operations unavailable to user roles."""
+    if not settings.supabase_url or not settings.supabase_service_role_key:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Supabase server operations are not configured",
+        )
+    return create_client(settings.supabase_url, settings.supabase_service_role_key)
+
+
 def get_current_user(
     authorization: str | None = Header(default=None),
 ) -> UserContext:

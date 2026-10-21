@@ -9,7 +9,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import ValidationError
 
-from app.api.dependencies import _create_supabase_client, get_current_user
+from app.api.dependencies import _create_supabase_admin_client, _create_supabase_client, get_current_user
 from app.core.config import get_settings
 from app.models.schemas import (
     CEFR_LEVEL,
@@ -25,6 +25,7 @@ from app.models.schemas import (
     VocabularyQuizAnswerRequest,
     VocabularyQuizAnswerResponse,
     VocabularyQuizCreateRequest,
+    VocabularyQuizHistoryItem,
     VocabularyQuizQuestion,
     VocabularyQuizResponse,
     VocabularyReviewRequest,
@@ -150,6 +151,8 @@ def _public_quiz_session(row: dict[str, Any]) -> VocabularyQuizResponse:
         answered_count=row.get("answered_count", 0),
         status=row["status"],
         score=row.get("score"),
+        started_at=row.get("started_at") or row.get("created_at") or datetime.now(timezone.utc),
+        time_limit_seconds=row.get("time_limit_seconds"),
     )
 
 
@@ -377,7 +380,7 @@ def get_words(
         total = response.count if response.count is not None else len(items)
 
     progress, favorites = _load_user_word_state(client, user.user_id, [item["slug"] for item in items])
-    mapped = [_map_catalog_item(item, progress, favorites).model_dump(mode="json") for item in items]
+    mapped = [_map_catalog_item(item, progress, favorites).model_dump(mode="json", by_alias=True) for item in items]
     return {"items": mapped, "total": total, "page": page, "page_size": page_size}
 
 
@@ -475,14 +478,21 @@ def get_vocabulary_progress(user: UserContext = Depends(get_current_user)) -> di
         .execute(),
         "Unable to load vocabulary favorites",
     )
+    quiz_answers = _rows(
+        client.postgrest.from_("vocabulary_quiz_answers")
+        .select("is_correct")
+        .eq("user_id", str(user.user_id))
+        .execute(),
+        "Unable to load vocabulary quiz results",
+    )
     now = datetime.now(timezone.utc)
     return {
         "studied_count": len(rows),
         "mastered_count": sum(row["mastery_level"] >= 4 for row in rows),
         "due_count": sum(datetime.fromisoformat(row["next_review_at"].replace("Z", "+00:00")) <= now for row in rows),
         "favorite_count": len(favorites),
-        "successes": sum(row["successes"] for row in rows),
-        "failures": sum(row["failures"] for row in rows),
+        "successes": sum(row["successes"] for row in rows) + sum(answer["is_correct"] for answer in quiz_answers),
+        "failures": sum(row["failures"] for row in rows) + sum(not answer["is_correct"] for answer in quiz_answers),
     }
 
 
@@ -525,6 +535,29 @@ def get_review_history(
         .execute(),
         "Unable to load vocabulary review history",
     )
+
+
+@router.get("/review/mistakes", response_model=list[VocabularyWordResponse])
+def get_vocabulary_mistakes(
+    limit: int = Query(default=50, ge=1, le=100),
+    user: UserContext = Depends(get_current_user),
+) -> list[VocabularyWordResponse]:
+    client = _create_supabase_client(user.access_token)
+    answer_rows = _rows(
+        client.postgrest.from_("vocabulary_quiz_answers")
+        .select("vocabulary_item_slug, answered_at")
+        .eq("user_id", str(user.user_id))
+        .eq("is_correct", False)
+        .order("answered_at", desc=True)
+        .limit(limit)
+        .execute(),
+        "Unable to load vocabulary mistakes",
+    )
+    slugs = list(dict.fromkeys(row["vocabulary_item_slug"] for row in answer_rows))
+    items = _load_catalog_items(client, slugs)
+    progress, favorites = _load_user_word_state(client, user.user_id, slugs)
+    by_slug = {item["slug"]: item for item in items}
+    return [_map_catalog_item(by_slug[slug], progress, favorites) for slug in slugs if slug in by_slug]
 
 
 @router.get("/favorites", response_model=list[VocabularyWordResponse])
@@ -602,18 +635,18 @@ def create_quiz(
     if len(candidates) < 3:
         raise HTTPException(status_code=422, detail="At least three vocabulary words are required")
 
-    selected = candidates[:]
     import random
 
-    random.SystemRandom().shuffle(selected)
+    randomizer = random.SystemRandom()
+    selected = candidates[:]
+    randomizer.shuffle(selected)
     selected = selected[:min(request.count, len(selected))]
     questions: list[dict[str, Any]] = []
     for index, item in enumerate(selected):
         question_type = request.question_types[index % len(request.question_types)]
         correct_answer = item["word"]
         options: list[str] = []
-        if question_type == "multiple_choice":
-            question_type = "multiple_choice"
+        if question_type in {"multiple_choice", "translation_match"}:
             prompt = f"Quelle est la traduction de « {item['word']} » ?"
             distractors = list(dict.fromkeys(
                 candidate["translation_fr"]
@@ -621,12 +654,51 @@ def create_quiz(
                 if candidate["slug"] != item["slug"]
                 and _normalize_answer(candidate["translation_fr"]) != _normalize_answer(item["translation_fr"])
             ))
-            import random as random_module
-
-            random_module.SystemRandom().shuffle(distractors)
+            randomizer.shuffle(distractors)
             options = [item["translation_fr"], *distractors[:3]]
-            random_module.SystemRandom().shuffle(options)
+            randomizer.shuffle(options)
             correct_answer = item["translation_fr"]
+            question_type = "translation_match" if question_type == "translation_match" else "multiple_choice"
+        elif question_type == "synonym":
+            synonyms = item.get("synonyms") or []
+            if not synonyms:
+                question_type = "write_word"
+                prompt = f"Écrivez le mot anglais correspondant à : « {item['translation_fr']} »"
+            else:
+                correct_answer = synonyms[0]
+                prompt = f"Choisissez un synonyme de « {item['word']} »"
+                distractors = list(dict.fromkeys(
+                    synonym
+                    for candidate in candidates
+                    if candidate["slug"] != item["slug"]
+                    for synonym in candidate.get("synonyms", [])
+                    if _normalize_answer(synonym) != _normalize_answer(correct_answer)
+                ))
+                randomizer.shuffle(distractors)
+                options = [correct_answer, *distractors[:3]]
+                randomizer.shuffle(options)
+        elif question_type == "scramble":
+            letters = [character for character in item["word"].replace(" ", "") if character.isalpha()]
+            if " " in item["word"] or len(letters) < 3 or len(set(letters)) < 2:
+                question_type = "write_word"
+                prompt = f"Écrivez le mot anglais correspondant à : « {item['translation_fr']} »"
+            else:
+                randomizer.shuffle(letters)
+                prompt = f"Remettez ces lettres dans l’ordre : {' '.join(letters)}"
+        elif question_type == "odd_one_out":
+            tags = item.get("tags") or []
+            group = [candidate for candidate in candidates if candidate["slug"] != item["slug"] and set(candidate.get("tags", [])) & set(tags)]
+            outsiders = [candidate for candidate in candidates if candidate["slug"] != item["slug"] and not (set(candidate.get("tags", [])) & set(tags))]
+            if tags and len(group) >= 2 and outsiders:
+                randomizer.shuffle(group)
+                odd = randomizer.choice(outsiders)
+                options = [item["word"], group[0]["word"], group[1]["word"], odd["word"]]
+                randomizer.shuffle(options)
+                correct_answer = odd["word"]
+                prompt = f"Trouvez l’intrus parmi ces mots liés au thème « {tags[0]} » :"
+            else:
+                question_type = "write_word"
+                prompt = f"Écrivez le mot anglais correspondant à : « {item['translation_fr']} »"
         elif question_type == "fill_blank":
             sentence = item["example_en"]
             pattern = re.compile(re.escape(item["word"]), flags=re.IGNORECASE)
@@ -649,10 +721,12 @@ def create_quiz(
             "item_slug": item["slug"],
         })
 
-    response = client.rpc("create_vocabulary_quiz", {
+    admin_client = _create_supabase_admin_client()
+    response = admin_client.rpc("create_vocabulary_quiz", {
         "p_user_id": str(user.user_id),
         "p_vocabulary_item_slugs": [item["slug"] for item in selected],
         "p_questions": questions,
+        "p_time_limit_seconds": request.time_limit_seconds,
     }).execute()
     _raise_for_database_error(response, "Unable to create vocabulary quiz")
     row = response.data
@@ -663,12 +737,39 @@ def create_quiz(
     return _public_quiz_session(row)
 
 
+@router.get("/quizzes/history", response_model=list[VocabularyQuizHistoryItem])
+def get_vocabulary_quiz_history(
+    limit: int = Query(default=20, ge=1, le=100),
+    user: UserContext = Depends(get_current_user),
+) -> list[VocabularyQuizHistoryItem]:
+    client = _create_supabase_client(user.access_token)
+    rows = _rows(
+        client.postgrest.from_("vocabulary_quiz_sessions")
+        .select("id, questions, answered_count, status, score, created_at, finished_at, time_limit_seconds")
+        .eq("user_id", str(user.user_id))
+        .order("created_at", desc=True)
+        .limit(limit)
+        .execute(),
+        "Unable to load vocabulary quiz history",
+    )
+    return [VocabularyQuizHistoryItem(
+        id=row["id"],
+        status=row["status"],
+        score=row.get("score"),
+        answered_count=row.get("answered_count", 0),
+        question_count=len(row.get("questions") or []),
+        started_at=row["created_at"],
+        finished_at=row.get("finished_at"),
+        time_limit_seconds=row.get("time_limit_seconds"),
+    ) for row in rows]
+
+
 @router.get("/quizzes/{quiz_id}", response_model=VocabularyQuizResponse)
 def get_quiz(quiz_id: UUID, user: UserContext = Depends(get_current_user)) -> VocabularyQuizResponse:
     client = _create_supabase_client(user.access_token)
     row = _one(
         client.postgrest.from_("vocabulary_quiz_sessions")
-        .select("id, questions, answered_count, status, score")
+        .select("id, questions, answered_count, status, score, created_at, time_limit_seconds")
         .eq("id", str(quiz_id))
         .eq("user_id", str(user.user_id))
         .execute(),
@@ -778,15 +879,48 @@ def get_scenario(scenario_slug: str, user: UserContext = Depends(get_current_use
     return scenario
 
 
+def _catalog_vocabulary_fallback(
+    request: VocabularyGenerateRequest,
+    user: UserContext,
+) -> VocabularyGenerateResponse:
+    client = _create_supabase_client(user.access_token)
+    candidates = _rows(
+        client.postgrest.from_("vocabulary_catalog_items")
+        .select("word, translation_fr, part_of_speech, cefr_level, ipa, example_en, example_fr, usage_note_fr, synonyms, tags")
+        .eq("is_published", True)
+        .eq("cefr_level", request.level)
+        .limit(500)
+        .execute(),
+        "Unable to load vocabulary fallback",
+    )
+    topic_terms = set(re.findall(r"[a-zA-ZÀ-ÿ]+", request.topic.casefold()))
+    candidates.sort(
+        key=lambda item: sum(
+            term in " ".join([item["word"], item["translation_fr"], *item.get("tags", [])]).casefold()
+            for term in topic_terms
+        ),
+        reverse=True,
+    )
+    items = [GeneratedVocabularyWord.model_validate(item) for item in candidates[:request.count]]
+    if not items:
+        raise HTTPException(status_code=503, detail="Vocabulary catalog fallback is unavailable")
+    return VocabularyGenerateResponse(items=items, source_type="catalog_fallback")
+
+
 @router.post("/ai/generate", response_model=VocabularyGenerateResponse)
 async def generate_vocabulary(
     request: VocabularyGenerateRequest,
     user: UserContext = Depends(get_current_user),
 ) -> VocabularyGenerateResponse:
     if not settings.groq_api_key or not settings.groq_model.strip():
-        raise HTTPException(status_code=503, detail="Vocabulary AI is not configured")
+        return _catalog_vocabulary_fallback(request, user)
     quota_client = _create_supabase_client(user.access_token)
-    _consume_ai_quota(quota_client, user.user_id)
+    try:
+        _consume_ai_quota(quota_client, user.user_id)
+    except HTTPException as exc:
+        if exc.status_code in {429, 502, 503}:
+            return _catalog_vocabulary_fallback(request, user)
+        raise
     system_prompt = (
         "Tu es un lexicographe pédagogique pour des francophones apprenant l'anglais. "
         "Retourne uniquement un objet JSON {items: [...]} conforme au schéma demandé. "
@@ -799,8 +933,8 @@ async def generate_vocabulary(
         "Chaque élément doit contenir word, translation_fr, part_of_speech, cefr_level, ipa, example_en, "
         "example_fr, usage_note_fr, synonyms et tags. Pas de doublons."
     )
-    generated = await _groq_json(system_prompt, user_prompt)
     try:
+        generated = await _groq_json(system_prompt, user_prompt)
         result = VocabularyGenerateResponse.model_validate(generated)
         if len(result.items) != request.count:
             raise ValueError("Unexpected number of items")
@@ -810,7 +944,11 @@ async def generate_vocabulary(
         if any(item.cefr_level != request.level for item in result.items):
             raise ValueError("Generated level does not match request")
     except (ValidationError, ValueError) as exc:
-        raise HTTPException(status_code=502, detail="Vocabulary AI returned invalid content") from exc
+        return _catalog_vocabulary_fallback(request, user)
+    except HTTPException as exc:
+        if exc.status_code not in {502, 503}:
+            raise
+        return _catalog_vocabulary_fallback(request, user)
     return result
 
 
@@ -820,9 +958,14 @@ async def explain_vocabulary(
     user: UserContext = Depends(get_current_user),
 ) -> VocabularyExplainResponse:
     if not settings.groq_api_key or not settings.groq_model.strip():
-        raise HTTPException(status_code=503, detail="Vocabulary AI is not configured")
+        return _catalog_explanation_fallback(request, user)
     quota_client = _create_supabase_client(user.access_token)
-    _consume_ai_quota(quota_client, user.user_id)
+    try:
+        _consume_ai_quota(quota_client, user.user_id)
+    except HTTPException as exc:
+        if exc.status_code in {429, 502, 503}:
+            return _catalog_explanation_fallback(request, user)
+        raise
     system_prompt = (
         "Tu es un professeur d'anglais pour francophones. Réponds uniquement par un JSON avec "
         "explanation_fr, examples (1 à 4 phrases anglaises avec leur traduction française), et common_mistake_fr. "
@@ -833,7 +976,35 @@ async def explain_vocabulary(
     try:
         return VocabularyExplainResponse.model_validate(generated)
     except ValidationError as exc:
-        raise HTTPException(status_code=502, detail="Vocabulary AI returned invalid content") from exc
+        return _catalog_explanation_fallback(request, user)
+    except HTTPException as exc:
+        if exc.status_code not in {502, 503}:
+            raise
+        return _catalog_explanation_fallback(request, user)
+
+
+def _catalog_explanation_fallback(
+    request: VocabularyExplainRequest,
+    user: UserContext,
+) -> VocabularyExplainResponse:
+    client = _create_supabase_client(user.access_token)
+    item = _one(
+        client.postgrest.from_("vocabulary_catalog_items")
+        .select("word, translation_fr, example_en, example_fr, usage_note_fr")
+        .eq("is_published", True)
+        .eq("normalized_word", _normalize_answer(request.word))
+        .execute(),
+        "Unable to load vocabulary explanation fallback",
+    )
+    if item is None:
+        raise HTTPException(status_code=503, detail="Vocabulary explanation fallback is unavailable")
+    explanation = f"{item['word']} signifie « {item['translation_fr']} ». {item.get('usage_note_fr') or ''}".strip()
+    return VocabularyExplainResponse(
+        explanation_fr=explanation,
+        examples=[f"{item['example_en']} — {item['example_fr']}"],
+        common_mistake_fr="Vérifiez la construction et le contexte décrits dans la fiche avant de réutiliser ce mot.",
+        source_type="catalog_fallback",
+    )
 
 
 @router.get("/ai/saved", response_model=list[SavedGeneratedVocabularyWord])

@@ -6,9 +6,11 @@ import type {
   VocabularyProgress,
   VocabularyQuiz,
   VocabularyQuizFeedback,
+  VocabularyQuizHistoryItem,
   VocabularyQuizQuestionType,
   VocabularyRating,
   VocabularyReviewResult,
+  VocabularySynonym,
   VocabularyScenario,
   VocabularyWord,
   VocabularyWordPage,
@@ -25,6 +27,7 @@ interface ApiVocabularyWord extends Omit<
   | 'exampleEn'
   | 'exampleFr'
   | 'usageNoteFr'
+  | 'synonymDetails'
   | 'sourceType'
   | 'masteryLevel'
   | 'nextReviewAt'
@@ -37,6 +40,7 @@ interface ApiVocabularyWord extends Omit<
   example_en: string;
   example_fr: string;
   usage_note_fr: string | null;
+  synonym_details: Array<{ word: string; register: VocabularySynonym['register']; nuance_fr: string }>;
   source_type: 'seeded' | 'ai_generated';
   mastery_level: number;
   next_review_at: string | null;
@@ -49,8 +53,18 @@ interface ApiCollection extends Omit<VocabularyCollection, 'cefrLevel' | 'wordCo
   mastered_count: number;
 }
 
-interface ApiVocabularyQuiz extends Omit<VocabularyQuiz, 'answeredCount'> {
+interface ApiVocabularyQuiz extends Omit<VocabularyQuiz, 'answeredCount' | 'startedAt' | 'timeLimitSeconds'> {
   answered_count: number;
+  started_at: string;
+  time_limit_seconds: 60 | 120 | null;
+}
+
+interface ApiVocabularyQuizHistoryItem extends Omit<VocabularyQuizHistoryItem, 'answeredCount' | 'questionCount' | 'startedAt' | 'finishedAt' | 'timeLimitSeconds'> {
+  answered_count: number;
+  question_count: number;
+  started_at: string;
+  finished_at: string | null;
+  time_limit_seconds: 60 | 120 | null;
 }
 
 interface ApiQuizFeedback extends Omit<VocabularyQuizFeedback, 'questionIndex' | 'isCorrect' | 'correctAnswer'> {
@@ -82,9 +96,10 @@ interface ApiGeneratedWord extends Omit<GeneratedVocabularyWord, 'translationFr'
   usage_note_fr: string;
 }
 
-interface ApiExplanation extends Omit<VocabularyExplanation, 'explanationFr' | 'commonMistakeFr'> {
+interface ApiExplanation extends Omit<VocabularyExplanation, 'explanationFr' | 'commonMistakeFr' | 'sourceType'> {
   explanation_fr: string;
   common_mistake_fr: string;
+  source_type: 'groq' | 'catalog_fallback';
 }
 
 interface ApiSavedGeneratedWord extends Omit<SavedGeneratedVocabularyWord, 'translationFr' | 'partOfSpeech' | 'cefrLevel' | 'exampleEn' | 'exampleFr' | 'usageNoteFr' | 'createdAt' | 'sourceType'> {
@@ -107,6 +122,7 @@ function mapWord(word: ApiVocabularyWord): VocabularyWord {
     example_en,
     example_fr,
     usage_note_fr,
+    synonym_details,
     source_type,
     mastery_level,
     next_review_at,
@@ -122,6 +138,11 @@ function mapWord(word: ApiVocabularyWord): VocabularyWord {
     exampleEn: example_en,
     exampleFr: example_fr,
     usageNoteFr: usage_note_fr,
+    synonymDetails: (synonym_details ?? []).map(({ word: synonymWord, register, nuance_fr }) => ({
+      word: synonymWord,
+      register,
+      nuanceFr: nuance_fr,
+    })),
     sourceType: source_type,
     masteryLevel: mastery_level,
     nextReviewAt: next_review_at,
@@ -135,8 +156,8 @@ function mapCollection(collection: ApiCollection): VocabularyCollection {
 }
 
 function mapQuiz(quiz: ApiVocabularyQuiz): VocabularyQuiz {
-  const { answered_count, ...rest } = quiz;
-  return { ...rest, answeredCount: answered_count };
+  const { answered_count, started_at, time_limit_seconds, ...rest } = quiz;
+  return { ...rest, answeredCount: answered_count, startedAt: started_at, timeLimitSeconds: time_limit_seconds };
 }
 
 function mapScenario(scenario: ApiVocabularyScenario): VocabularyScenario {
@@ -216,6 +237,10 @@ export const vocabularyService = {
     return mapWord(await apiGet<ApiVocabularyWord>(`/vocabulary/words/${slug}`));
   },
 
+  async getRelatedWords(slug: string): Promise<VocabularyWord[]> {
+    return (await apiGet<ApiVocabularyWord[]>(`/vocabulary/words/${slug}/related`)).map(mapWord);
+  },
+
   async getFavorites(): Promise<VocabularyWord[]> {
     return (await apiGet<ApiVocabularyWord[]>('/vocabulary/favorites')).map(mapWord);
   },
@@ -227,6 +252,10 @@ export const vocabularyService = {
 
   async getDueReviews(): Promise<VocabularyWord[]> {
     return (await apiGet<ApiVocabularyWord[]>('/vocabulary/review/due')).map(mapWord);
+  },
+
+  async getMistakeWords(): Promise<VocabularyWord[]> {
+    return (await apiGet<ApiVocabularyWord[]>('/vocabulary/review/mistakes')).map(mapWord);
   },
 
   async getProgress(): Promise<VocabularyProgress> {
@@ -256,12 +285,14 @@ export const vocabularyService = {
     level?: CEFRLevel;
     count?: number;
     questionTypes?: VocabularyQuizQuestionType[];
+    timeLimitSeconds?: 60 | 120;
   }): Promise<VocabularyQuiz> {
     const quiz = await apiPost<ApiVocabularyQuiz>('/vocabulary/quizzes', {
       collection_slug: input.collectionSlug,
       level: input.level,
       count: input.count,
       question_types: input.questionTypes,
+      time_limit_seconds: input.timeLimitSeconds,
     });
     return mapQuiz(quiz);
   },
@@ -283,12 +314,24 @@ export const vocabularyService = {
     return mapQuiz(await apiPost<ApiVocabularyQuiz>(`/vocabulary/quizzes/${quizId}/finish`));
   },
 
+  async getQuizHistory(): Promise<VocabularyQuizHistoryItem[]> {
+    const rows = await apiGet<ApiVocabularyQuizHistoryItem[]>('/vocabulary/quizzes/history');
+    return rows.map(({ answered_count, question_count, started_at, finished_at, time_limit_seconds, ...rest }) => ({
+      ...rest,
+      answeredCount: answered_count,
+      questionCount: question_count,
+      startedAt: started_at,
+      finishedAt: finished_at,
+      timeLimitSeconds: time_limit_seconds,
+    }));
+  },
+
   async getScenarios(level?: CEFRLevel): Promise<VocabularyScenario[]> {
     return (await apiGet<ApiVocabularyScenario[]>('/vocabulary/scenarios', { params: { level } })).map(mapScenario);
   },
 
   async generateVocabulary(input: { topic: string; level: CEFRLevel; count: number; goal?: string }): Promise<GeneratedVocabularyWord[]> {
-    const response = await apiPost<{ source_type: 'ai_generated'; items: ApiGeneratedWord[] }>('/vocabulary/ai/generate', input);
+    const response = await apiPost<{ source_type: 'ai_generated' | 'catalog_fallback'; items: ApiGeneratedWord[] }>('/vocabulary/ai/generate', input);
     return response.items.map((item) => ({
       word: item.word,
       translationFr: item.translation_fr,
@@ -300,7 +343,7 @@ export const vocabularyService = {
       usageNoteFr: item.usage_note_fr,
       synonyms: item.synonyms,
       tags: item.tags,
-      sourceType: 'ai_generated',
+      sourceType: response.source_type,
     }));
   },
 
@@ -314,6 +357,7 @@ export const vocabularyService = {
       explanationFr: response.explanation_fr,
       examples: response.examples,
       commonMistakeFr: response.common_mistake_fr,
+      sourceType: response.source_type,
     };
   },
 

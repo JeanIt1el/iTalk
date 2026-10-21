@@ -266,8 +266,10 @@ def test_vocabulary_routes_require_authenticated_user():
         "/api/v1/vocabulary/words",
         "/api/v1/vocabulary/search",
         "/api/v1/vocabulary/review/due",
+        "/api/v1/vocabulary/review/mistakes",
         "/api/v1/vocabulary/progress",
         "/api/v1/vocabulary/favorites",
+        "/api/v1/vocabulary/quizzes/history",
         "/api/v1/vocabulary/scenarios",
         "/api/v1/vocabulary/ai/generate",
         "/api/v1/vocabulary/ai/explain",
@@ -301,6 +303,108 @@ def test_vocabulary_generation_and_quiz_limits_are_validated():
         VocabularyQuizCreateRequest(count=2)
 
 
+def test_vocabulary_games_and_timers_are_validated():
+    quiz = VocabularyQuizCreateRequest(
+        count=10,
+        question_types=["synonym", "translation_match", "fill_blank", "scramble", "odd_one_out"],
+        time_limit_seconds=60,
+    )
+    assert quiz.time_limit_seconds == 60
+    with pytest.raises(ValidationError):
+        VocabularyQuizCreateRequest(time_limit_seconds=90)
+
+
+def test_vocabulary_quiz_creation_builds_all_game_modes_server_side(monkeypatch):
+    from uuid import uuid4
+
+    from app.api import vocabulary
+    from app.models.schemas import UserContext, VocabularyQuizCreateRequest
+
+    user = UserContext(user_id=uuid4(), access_token="test-token", email="test@example.com")
+    words = [
+        {"slug": "apple", "word": "apple", "translation_fr": "pomme", "part_of_speech": "nom", "cefr_level": "A1", "ipa": "", "example_en": "I eat an apple.", "example_fr": "Je mange une pomme.", "usage_note_fr": "Fruit.", "synonyms": ["fruit"], "tags": ["food"]},
+        {"slug": "bread", "word": "bread", "translation_fr": "pain", "part_of_speech": "nom", "cefr_level": "A1", "ipa": "", "example_en": "We bought bread.", "example_fr": "Nous avons acheté du pain.", "usage_note_fr": "Aliment.", "synonyms": ["loaf"], "tags": ["food"]},
+        {"slug": "soup", "word": "soup", "translation_fr": "soupe", "part_of_speech": "nom", "cefr_level": "A1", "ipa": "", "example_en": "The soup is warm.", "example_fr": "La soupe est chaude.", "usage_note_fr": "Plat.", "synonyms": ["broth"], "tags": ["food"]},
+        {"slug": "train", "word": "train", "translation_fr": "train", "part_of_speech": "nom", "cefr_level": "A1", "ipa": "", "example_en": "The train is late.", "example_fr": "Le train est en retard.", "usage_note_fr": "Transport.", "synonyms": ["railway"], "tags": ["travel"]},
+        {"slug": "taxi", "word": "taxi", "translation_fr": "taxi", "part_of_speech": "nom", "cefr_level": "A1", "ipa": "", "example_en": "We called a taxi.", "example_fr": "Nous avons appelé un taxi.", "usage_note_fr": "Transport.", "synonyms": ["cab"], "tags": ["travel"]},
+        {"slug": "bus", "word": "bus", "translation_fr": "bus", "part_of_speech": "nom", "cefr_level": "A1", "ipa": "", "example_en": "The bus stops here.", "example_fr": "Le bus s’arrête ici.", "usage_note_fr": "Transport.", "synonyms": ["coach"], "tags": ["travel"]},
+        {"slug": "cheese", "word": "cheese", "translation_fr": "fromage", "part_of_speech": "nom", "cefr_level": "A1", "ipa": "", "example_en": "I like cheese.", "example_fr": "J’aime le fromage.", "usage_note_fr": "Aliment.", "synonyms": ["cheddar"], "tags": ["food"]},
+    ]
+    captured = {}
+
+    class FakeQuery:
+        def select(self, *_args, **_kwargs):
+            return self
+
+        def eq(self, *_args, **_kwargs):
+            return self
+
+        def limit(self, *_args, **_kwargs):
+            return self
+
+        def execute(self):
+            return type("QueryResult", (), {"error": None, "data": words})()
+
+    class FakePostgrest:
+        def from_(self, *_args):
+            return FakeQuery()
+
+    class FakeClient:
+        postgrest = FakePostgrest()
+
+    class FakeRpc:
+        def execute(self):
+            public_questions = [
+                {key: value for key, value in question.items() if key not in {"answer", "accepted_answers", "explanation", "item_slug"}}
+                for question in captured["p_questions"]
+            ]
+            return type("RpcResult", (), {"error": None, "data": {
+                "id": str(uuid4()),
+                "questions": public_questions,
+                "answered_count": 0,
+                "status": "active",
+                "score": None,
+                "started_at": "2026-10-21T12:00:00+00:00",
+                "time_limit_seconds": captured["p_time_limit_seconds"],
+            }})()
+
+    class FakeAdminClient:
+        def rpc(self, _name, params):
+            captured.update(params)
+            return FakeRpc()
+
+    monkeypatch.setattr(vocabulary, "_create_supabase_client", lambda _token: FakeClient())
+    monkeypatch.setattr(vocabulary, "_create_supabase_admin_client", lambda: FakeAdminClient())
+    result = vocabulary.create_quiz(
+        VocabularyQuizCreateRequest(
+            count=5,
+            question_types=["synonym", "translation_match", "fill_blank", "scramble", "odd_one_out"],
+            time_limit_seconds=60,
+        ),
+        user,
+    )
+
+    assert {question.type for question in result.questions} == {
+        "synonym", "translation_match", "fill_blank", "scramble", "odd_one_out"
+    }
+    assert captured["p_time_limit_seconds"] == 60
+    assert all("answer" not in question.model_dump() for question in result.questions)
+
+
+def test_vocabulary_synonym_register_is_validated():
+    from app.models.schemas import VocabularySynonym
+
+    synonym = VocabularySynonym.model_validate({
+        "word": "attain",
+        "register": "formal",
+        "nuance_fr": "S’emploie surtout pour un objectif.",
+    })
+    assert synonym.register_type == "formal"
+    assert synonym.model_dump(by_alias=True)["register"] == "formal"
+    with pytest.raises(ValidationError):
+        VocabularySynonym(word="attain", register="slang")
+
+
 def test_vocabulary_ai_word_schema_rejects_unexpected_fields():
     item = GeneratedVocabularyWord(
         word="figure out",
@@ -324,16 +428,29 @@ def test_vocabulary_ai_requires_groq_configuration(monkeypatch):
 
     from app.api import vocabulary
     from app.api.dependencies import get_current_user
-    from app.models.schemas import UserContext
+    from app.models.schemas import GeneratedVocabularyWord, UserContext, VocabularyGenerateResponse
 
     user = UserContext(user_id=uuid4(), access_token="test-token", email="test@example.com")
     monkeypatch.setitem(app.dependency_overrides, get_current_user, lambda: user)
     monkeypatch.setattr(vocabulary.settings, "groq_api_key", "")
+    monkeypatch.setattr(vocabulary, "_catalog_vocabulary_fallback", lambda _request, _user: VocabularyGenerateResponse(
+        items=[GeneratedVocabularyWord(
+            word="journey",
+            translation_fr="voyage",
+            part_of_speech="nom",
+            cefr_level="A2",
+            example_en="The journey takes an hour.",
+            example_fr="Le trajet dure une heure.",
+            usage_note_fr="Exemple de repli.",
+        )],
+        source_type="catalog_fallback",
+    ))
     response = client.post(
         "/api/v1/vocabulary/ai/generate",
         json={"topic": "travel", "level": "A2", "count": 5},
     )
-    assert response.status_code == 503
+    assert response.status_code == 200
+    assert response.json()["source_type"] == "catalog_fallback"
 
 
 def test_vocabulary_ai_provider_failure_is_generic_and_secret_safe(monkeypatch):
@@ -352,7 +469,39 @@ def test_vocabulary_ai_provider_failure_is_generic_and_secret_safe(monkeypatch):
         def execute(self):
             return type("RpcResult", (), {"error": None, "data": 1})()
 
+    fallback_words = [{
+        "word": f"travel-word-{index}",
+        "translation_fr": f"mot de voyage {index}",
+        "part_of_speech": "nom",
+        "cefr_level": "A2",
+        "ipa": "",
+        "example_en": f"I learned travel-word-{index}.",
+        "example_fr": f"J’ai appris le mot {index}.",
+        "usage_note_fr": "Entrée issue du catalogue.",
+        "synonyms": [],
+        "tags": ["travel"],
+    } for index in range(5)]
+
+    class FakeQuery:
+        def select(self, *_args, **_kwargs):
+            return self
+
+        def eq(self, *_args, **_kwargs):
+            return self
+
+        def limit(self, *_args, **_kwargs):
+            return self
+
+        def execute(self):
+            return type("QueryResult", (), {"error": None, "data": fallback_words})()
+
+    class FakePostgrest:
+        def from_(self, *_args):
+            return FakeQuery()
+
     class FakeSupabase:
+        postgrest = FakePostgrest()
+
         def rpc(self, *_args, **_kwargs):
             return FakeRpc()
 
@@ -373,7 +522,9 @@ def test_vocabulary_ai_provider_failure_is_generic_and_secret_safe(monkeypatch):
         json={"topic": "travel", "level": "A2", "count": 5},
     )
 
-    assert response.status_code == 502
+    assert response.status_code == 200
+    assert response.json()["source_type"] == "catalog_fallback"
+    assert len(response.json()["items"]) == 5
     assert "private-test-key" not in response.text
     assert "provider unavailable" not in response.text
 
@@ -472,3 +623,40 @@ def test_vocabulary_seed_is_a1_a2_sized_and_idempotent():
     assert "unique (user_id, request_id)" in sql
     assert "create table if not exists public.vocabulary_quiz_answer_keys" in sql
     assert "where public.vocabulary_ai_daily_usage.request_count < 20" in sql
+
+
+def test_vocabulary_advanced_catalog_covers_b1_to_c2():
+    migration = Path(__file__).parents[1] / "supabase" / "migrations" / "20261013_vocabulary_catalog_advanced_levels.sql"
+    sql = migration.read_text(encoding="utf-8")
+    levels = re.findall(r"^\('[^']+', '[^']+', '[^']+', '[^']+', '[^']+', '(B1|B2|C1|C2)',", sql, flags=re.MULTILINE)
+    assert {level: levels.count(level) for level in ("B1", "B2", "C1", "C2")} == {
+        "B1": 12,
+        "B2": 12,
+        "C1": 12,
+        "C2": 13,
+    }
+    assert sql.count("on conflict (slug) do nothing;") == 1
+
+
+def test_vocabulary_volume_migration_adds_a2_and_advanced_collections():
+    migration = Path(__file__).parents[1] / "supabase" / "migrations" / "20261016_vocabulary_catalog_volume.sql"
+    sql = migration.read_text(encoding="utf-8")
+    levels = re.findall(r"^\('[^']+', '[^']+', '[^']+', '[^']+', '[^']+', '(A2|B1|B2|C1|C2)',", sql, flags=re.MULTILINE)
+    assert {level: levels.count(level) for level in ("A2", "B1", "B2", "C1", "C2")} == {
+        "A2": 15,
+        "B1": 10,
+        "B2": 10,
+        "C1": 9,
+        "C2": 10,
+    }
+    assert "b1-communication-and-work" in sql
+    assert "c2-advanced-expression" in sql
+
+
+def test_vocabulary_quiz_timer_migration_keeps_answers_server_authoritative():
+    migration = Path(__file__).parents[1] / "supabase" / "migrations" / "20261015_vocabulary_quiz_timers.sql"
+    sql = migration.read_text(encoding="utf-8")
+    assert "time_limit_seconds in (60, 120)" in sql
+    assert "now() >= v_session.deadline_at" in sql
+    assert "grant execute on function public.create_vocabulary_quiz(uuid, text[], jsonb, smallint) to service_role" in sql
+    assert "round(v_session.correct_answers * 100.0 / v_question_count)" in sql

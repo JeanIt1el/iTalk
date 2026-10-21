@@ -162,6 +162,14 @@ class VocabularyItemCreate(BaseModel):
     context_sentence: str | None = Field(default=None, max_length=2000)
 
 
+class VocabularySynonym(BaseModel):
+    word: str = Field(min_length=1, max_length=100)
+    register_type: Literal["familiar", "neutral", "formal", "academic"] = Field(default="neutral", alias="register")
+    nuance_fr: str = Field(default="", max_length=300)
+
+    model_config = {"populate_by_name": True}
+
+
 class VocabularyWordResponse(BaseModel):
     slug: str
     word: str
@@ -174,6 +182,7 @@ class VocabularyWordResponse(BaseModel):
     example_fr: str
     usage_note_fr: str | None = None
     synonyms: list[str] = Field(default_factory=list)
+    synonym_details: list[VocabularySynonym] = Field(default_factory=list)
     antonyms: list[str] = Field(default_factory=list)
     collocations: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
@@ -207,7 +216,15 @@ class VocabularyReviewResponse(BaseModel):
     duplicate: bool = False
 
 
-QUIZ_QUESTION_TYPE = Literal["multiple_choice", "write_word", "fill_blank"]
+QUIZ_QUESTION_TYPE = Literal[
+    "multiple_choice",
+    "write_word",
+    "fill_blank",
+    "synonym",
+    "translation_match",
+    "scramble",
+    "odd_one_out",
+]
 
 
 class VocabularyQuizCreateRequest(BaseModel):
@@ -217,8 +234,9 @@ class VocabularyQuizCreateRequest(BaseModel):
     question_types: list[QUIZ_QUESTION_TYPE] = Field(
         default_factory=lambda: ["multiple_choice", "write_word", "fill_blank"],
         min_length=1,
-        max_length=3,
+        max_length=7,
     )
+    time_limit_seconds: Literal[60, 120] | None = None
 
 
 class VocabularyQuizQuestion(BaseModel):
@@ -234,6 +252,19 @@ class VocabularyQuizResponse(BaseModel):
     answered_count: int = Field(ge=0)
     status: Literal["active", "completed", "abandoned"]
     score: int | None = Field(default=None, ge=0, le=100)
+    started_at: datetime
+    time_limit_seconds: Literal[60, 120] | None = None
+
+
+class VocabularyQuizHistoryItem(BaseModel):
+    id: UUID
+    status: Literal["active", "completed", "abandoned"]
+    score: int | None = Field(default=None, ge=0, le=100)
+    answered_count: int = Field(ge=0)
+    question_count: int = Field(ge=0)
+    started_at: datetime
+    finished_at: datetime | None = None
+    time_limit_seconds: Literal[60, 120] | None = None
 
 
 class VocabularyQuizAnswerRequest(BaseModel):
@@ -283,7 +314,7 @@ class VocabularyGenerateRequest(BaseModel):
 
 class VocabularyGenerateResponse(BaseModel):
     items: list[GeneratedVocabularyWord]
-    source_type: Literal["ai_generated"] = "ai_generated"
+    source_type: Literal["ai_generated", "catalog_fallback"] = "ai_generated"
 
 
 class SavedGeneratedVocabularyWord(GeneratedVocabularyWord):
@@ -302,6 +333,7 @@ class VocabularyExplainResponse(BaseModel):
     explanation_fr: str = Field(min_length=1, max_length=1500)
     examples: list[str] = Field(min_length=1, max_length=4)
     common_mistake_fr: str = Field(min_length=1, max_length=500)
+    source_type: Literal["groq", "catalog_fallback"] = "groq"
 
 
 class LearningSessionCreate(BaseModel):

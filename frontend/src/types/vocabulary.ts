@@ -1,7 +1,21 @@
 import type { CEFRLevel } from './user';
 
 export type VocabularyRating = 'again' | 'hard' | 'good' | 'easy';
-export type VocabularyQuizQuestionType = 'multiple_choice' | 'write_word' | 'fill_blank';
+export type VocabularyQuizQuestionType =
+  | 'multiple_choice'
+  | 'write_word'
+  | 'fill_blank'
+  | 'synonym'
+  | 'translation_match'
+  | 'scramble'
+  | 'odd_one_out';
+export type VocabularyRegister = 'familiar' | 'neutral' | 'formal' | 'academic';
+
+export interface VocabularySynonym {
+  word: string;
+  register: VocabularyRegister;
+  nuanceFr: string;
+}
 
 export interface VocabularyWord {
   slug: string;
@@ -15,6 +29,7 @@ export interface VocabularyWord {
   exampleFr: string;
   usageNoteFr: string | null;
   synonyms: string[];
+  synonymDetails: VocabularySynonym[];
   antonyms: string[];
   collocations: string[];
   tags: string[];
@@ -71,6 +86,19 @@ export interface VocabularyQuiz {
   answeredCount: number;
   status: 'active' | 'completed' | 'abandoned';
   score: number | null;
+  startedAt: string;
+  timeLimitSeconds: 60 | 120 | null;
+}
+
+export interface VocabularyQuizHistoryItem {
+  id: string;
+  status: 'active' | 'completed' | 'abandoned';
+  score: number | null;
+  answeredCount: number;
+  questionCount: number;
+  startedAt: string;
+  finishedAt: string | null;
+  timeLimitSeconds: 60 | 120 | null;
 }
 
 export interface VocabularyQuizFeedback {
@@ -102,16 +130,18 @@ export interface GeneratedVocabularyWord {
   usageNoteFr: string;
   synonyms: string[];
   tags: string[];
-  sourceType: 'ai_generated';
+  sourceType: 'ai_generated' | 'catalog_fallback';
 }
 
 export interface SavedGeneratedVocabularyWord extends GeneratedVocabularyWord {
   id: string;
   createdAt: string;
+  sourceType: 'ai_generated';
 }
 
 export interface VocabularyExplanation {
   explanationFr: string;
   examples: string[];
   commonMistakeFr: string;
+  sourceType: 'groq' | 'catalog_fallback';
 }
